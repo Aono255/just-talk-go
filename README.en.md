@@ -1,5 +1,7 @@
 # Just Talk
 
+After editing the App Key or Access Key in the TUI, leave edit mode and press `s` to save. The next recording uses the new credentials without restarting. An ongoing recognition session keeps the credentials used to establish its connection.
+
 [中文](README.md) · [Website](https://whoamihappyhacking.github.io/just-talk-go/)
 
 Just Talk is a desktop voice input tool. It records audio with a global hotkey, sends it to streaming ASR, and then copies the recognized text to the clipboard or submits it directly into the focused input field.

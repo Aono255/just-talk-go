@@ -4,6 +4,7 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Fix TUI configuration reloads retaining old ASR credentials: after saving with `s`, the next recording uses the updated App Key and Access Key without restarting.
 - Add a responsive Chinese project introduction website with a simulated recording and R-triggered retry demo, platform-specific launch commands, static HTTP preview on port 7788, and automated GitHub Pages deployment linked from both READMEs.
 
 ## v0.0.3 - 2026-07-29

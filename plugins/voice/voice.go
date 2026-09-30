@@ -322,6 +322,9 @@ func (p *VoicePlugin) Stop() error {
 func (p *VoicePlugin) OnConfigReload(cfg *config.Config) error { return p.registerFromConfig(cfg) }
 
 func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
+	p.mu.Lock()
+	p.cfg = cfg
+	p.mu.Unlock()
 	vc := cfg.Voice
 	if !vc.Enabled {
 		p.mu.Lock()
