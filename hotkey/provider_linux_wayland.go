@@ -61,6 +61,7 @@ var evdevKeyToUnified = map[uint16]KeyCode{
 	56: KeyAlt, 100: KeyAlt, // LEFTALT, RIGHTALT
 	42: KeyShift, 54: KeyShift, // LEFTSHIFT, RIGHTSHIFT
 	125: KeySuper, 126: KeySuper, // LEFTMETA, RIGHTMETA
+	464: KeyFn, // KEY_FN
 
 	// Function keys
 	59: KeyF1, 60: KeyF2, 61: KeyF3, 62: KeyF4,

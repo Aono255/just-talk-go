@@ -6,7 +6,9 @@ package hotkey
 //
 //	0        - KeyNone (reserved)
 //	1..255   - Regular keys (A-Z, 0-9, punctuation — mapped to platform scan/virtual codes)
-//	256..289  - Modifier virtual keys (Ctrl, Alt, Shift, Super)
+//
+// 256..289  - Modifier virtual keys (Ctrl, Alt, Shift, Super, Fn)
+//
 //	290..313  - Function keys (F1-F24)
 //	314..349  - Navigation keys (arrows, home, end, etc.)
 //	350..    - Reserved for future expansion
@@ -129,6 +131,7 @@ const (
 	KeyAlt   KeyCode = 257
 	KeyShift KeyCode = 258
 	KeySuper KeyCode = 259
+	KeyFn    KeyCode = 260
 )
 
 // ---- Function keys (290..313) ----
@@ -219,6 +222,7 @@ var keyNames = map[KeyCode]string{
 	KeyAlt:   "Alt",
 	KeyShift: "Shift",
 	KeySuper: "Super",
+	KeyFn:    "Fn",
 
 	KeyF1: "F1", KeyF2: "F2", KeyF3: "F3", KeyF4: "F4",
 	KeyF5: "F5", KeyF6: "F6", KeyF7: "F7", KeyF8: "F8",
@@ -238,7 +242,7 @@ func (k KeyCode) String() string {
 
 // IsModifier returns true if the key code is a modifier virtual key.
 func (k KeyCode) IsModifier() bool {
-	return k >= KeyCtrl && k <= KeySuper
+	return k >= KeyCtrl && k <= KeyFn
 }
 
 // IsFunctionKey returns true if the key code is a function key (F1-F24).
@@ -281,6 +285,8 @@ func KeyCodeToModifier(k KeyCode) Modifier {
 		return ModShift
 	case KeySuper:
 		return ModSuper
+	case KeyFn:
+		return ModFn
 	default:
 		return ModNone
 	}

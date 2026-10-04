@@ -131,6 +131,7 @@ var modifierNames = map[string]hotkey.Modifier{
 	"ctrl": hotkey.ModCtrl, "alt": hotkey.ModAlt, "shift": hotkey.ModShift,
 	"control": hotkey.ModCtrl, "option": hotkey.ModAlt, "super": hotkey.ModSuper,
 	"cmd": hotkey.ModSuper, "command": hotkey.ModSuper, "win": hotkey.ModSuper,
+	"fn": hotkey.ModFn, "function": hotkey.ModFn,
 }
 
 var keyNameToCode = buildKeyNameMap()
@@ -157,6 +158,8 @@ func buildKeyNameMap() map[string]hotkey.KeyCode {
 	m["cmd"] = hotkey.KeySuper
 	m["command"] = hotkey.KeySuper
 	m["win"] = hotkey.KeySuper
+	m["fn"] = hotkey.KeyFn
+	m["function"] = hotkey.KeyFn
 	for _, k := range []hotkey.KeyCode{
 		hotkey.KeySpace, hotkey.KeyTab, hotkey.KeyEnter, hotkey.KeyEscape,
 		hotkey.KeyBackspace, hotkey.KeyCapsLock,
@@ -232,6 +235,9 @@ func ParseHotkey(s string) (hotkey.Combo, error) {
 			continue
 		}
 		return hotkey.Combo{}, fmt.Errorf("unknown key %q in %q", part, s)
+	}
+	if mods&hotkey.ModFn != 0 && key != hotkey.KeyNone {
+		return hotkey.Combo{}, fmt.Errorf("Fn must be used alone in %q", s)
 	}
 	if key == hotkey.KeyNone && mods != hotkey.ModNone {
 		return hotkey.Combo{Mods: mods, Key: hotkey.KeyNone}, nil

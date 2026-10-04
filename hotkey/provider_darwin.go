@@ -120,6 +120,7 @@ var darwinKeyToUnified = map[uint16]KeyCode{
 
 	0x3B: KeyCtrl, 0x3A: KeyAlt, 0x38: KeyShift, 0x37: KeySuper,
 	0x3E: KeyCtrl, 0x3D: KeyAlt, 0x3C: KeyShift, 0x36: KeySuper,
+	0x3F: KeyFn,
 
 	0x7A: KeyF1, 0x78: KeyF2, 0x63: KeyF3, 0x76: KeyF4,
 	0x60: KeyF5, 0x61: KeyF6, 0x62: KeyF7, 0x64: KeyF8,
@@ -152,6 +153,9 @@ func darwinFlagsToMods(flags C.uint64_t) Modifier {
 	}
 	if flags&C.kCGEventFlagMaskCommand != 0 {
 		m |= ModSuper
+	}
+	if flags&C.kCGEventFlagMaskSecondaryFn != 0 {
+		m |= ModFn
 	}
 	return m
 }

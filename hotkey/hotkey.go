@@ -21,6 +21,7 @@ const (
 	ModAlt                        // 2
 	ModShift                      // 4
 	ModSuper                      // 8 (Win / Cmd)
+	ModFn                         // 16 (macOS Fn)
 )
 
 // String returns a human-readable representation of the modifier mask.
@@ -40,6 +41,9 @@ func (m Modifier) String() string {
 	}
 	if m&ModSuper != 0 {
 		s += "Super+"
+	}
+	if m&ModFn != 0 {
+		s += "Fn+"
 	}
 	if s != "" {
 		s = s[:len(s)-1] // trim trailing "+"
@@ -88,9 +92,9 @@ func (c Combo) String() string {
 type EventType int
 
 const (
-	KeyDown   EventType = iota // Key pressed down
-	KeyUp                      // Key released
-	KeyPress                   // Key pressed and quickly released (simulates a "click")
+	KeyDown  EventType = iota // Key pressed down
+	KeyUp                     // Key released
+	KeyPress                  // Key pressed and quickly released (simulates a "click")
 )
 
 // String returns a human-readable event type name.

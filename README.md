@@ -163,9 +163,11 @@ push_to_talk = "Alt+Super"
 语音热键只支持适合作为全局快捷键的按键：
 
 - 支持：纯修饰键组合，如 `Alt+Super`、`Ctrl+Alt+Shift`。
+- 支持：macOS 和 Linux 上单独使用 `Fn`；也可以使用 `Function` 作为别名。`Fn` 不能与 `F1`、数字或其他按键组合。
+- Linux 使用 evdev 读取 `Fn`；未显式指定后端时，配置了 `Fn` 的热键会自动使用 evdev 后端。若手动指定 `--backend x11`，请改用 `--backend wayland`。
 - 支持：功能键 `F1` 到 `F24`，如 `F9`、`Alt+F8`。
 - 支持：非文本控制键和导航键，如 `Tab`、`Enter`、`Escape`、`Backspace`、`CapsLock`、`Up`、`Down`、`Left`、`Right`、`Home`、`End`、`PageUp`、`PageDown`、`Insert`、`Delete`。
-- 不支持：字母、数字、标点、空格、数字小键盘数字和符号等会输入文本的按键，如 `Alt+G`、`G`、`Alt+1`、`Alt+Space`。
+- 不支持：Fn 与其他按键的组合，以及字母、数字、标点、空格、数字小键盘数字和符号等会输入文本的按键，如 `Fn+F5`、`Fn+1`、`Alt+G`、`G`、`Alt+1`、`Alt+Space`。
 
 热词示例：
 
@@ -178,8 +180,8 @@ macOS 热键写法：
 
 ```toml
 [voice]
-# Option 等价于 Alt，Command/Cmd 等价于 Super
-push_to_talk = "Option+Command"
+# Option 等价于 Alt，Command/Cmd 等价于 Super；Fn 必须单独使用
+push_to_talk = "Fn"
 ```
 
 Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不可用，请在“Windows 设置 → 隐私和安全性 → 麦克风”中允许桌面应用访问麦克风。

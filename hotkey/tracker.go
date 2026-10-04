@@ -282,6 +282,9 @@ func (t *KeyStateTracker) modifierToKeyCode(mods Modifier) []KeyCode {
 	if mods&ModSuper != 0 {
 		keys = append(keys, KeySuper)
 	}
+	if mods&ModFn != 0 {
+		keys = append(keys, KeyFn)
+	}
 	return keys
 }
 
