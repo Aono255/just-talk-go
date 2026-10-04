@@ -236,9 +236,6 @@ func ParseHotkey(s string) (hotkey.Combo, error) {
 		}
 		return hotkey.Combo{}, fmt.Errorf("unknown key %q in %q", part, s)
 	}
-	if mods&hotkey.ModFn != 0 && key != hotkey.KeyNone {
-		return hotkey.Combo{}, fmt.Errorf("Fn must be used alone in %q", s)
-	}
 	if key == hotkey.KeyNone && mods != hotkey.ModNone {
 		return hotkey.Combo{Mods: mods, Key: hotkey.KeyNone}, nil
 	}

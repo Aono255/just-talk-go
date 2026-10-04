@@ -964,10 +964,10 @@ func (p *VoicePlugin) cleanupTransientHotkeysLocked() {
 }
 
 func validateVoiceHotkey(combo hotkey.Combo) error {
-	if combo.Mods&hotkey.ModFn != 0 && combo.Key != hotkey.KeyNone {
-		return fmt.Errorf("Fn 不能与其他按键组合为语音热键 %s；请单独使用 Fn", combo)
+	if combo.Mods&hotkey.ModFn != 0 && combo.Key.IsFunctionKey() {
+		return fmt.Errorf("Fn 不能与功能键组合为语音热键 %s；请改用字母或其他非功能键", combo)
 	}
-	if combo.Key.IsTextKey() {
+	if combo.Key.IsTextKey() && combo.Mods&hotkey.ModFn == 0 {
 		return fmt.Errorf("语音热键不支持普通字符键 %s；请使用适合作为全局快捷键的组合，如 Alt+Super、Alt+F8、F9、Ctrl+Alt+Tab", combo)
 	}
 	return nil

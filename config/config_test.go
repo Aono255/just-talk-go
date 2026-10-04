@@ -17,9 +17,20 @@ func TestParseHotkeyFnModifier(t *testing.T) {
 			t.Fatalf("ParseHotkey(%q) = %v, want %v", input, combo, want)
 		}
 	}
-	for _, input := range []string{"Fn+F5", "Fn+1"} {
-		if _, err := ParseHotkey(input); err == nil {
-			t.Fatalf("ParseHotkey(%q) succeeded, want Fn combination error", input)
+	for _, test := range []struct {
+		input string
+		key   hotkey.KeyCode
+	}{
+		{input: "Fn+F5", key: hotkey.KeyF5},
+		{input: "Fn+A", key: hotkey.KeyA},
+	} {
+		combo, err := ParseHotkey(test.input)
+		if err != nil {
+			t.Fatalf("ParseHotkey(%q): %v", test.input, err)
+		}
+		want := hotkey.Combo{Mods: hotkey.ModFn, Key: test.key}
+		if combo != want {
+			t.Fatalf("ParseHotkey(%q) = %v, want %v", test.input, combo, want)
 		}
 	}
 }

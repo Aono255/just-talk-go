@@ -163,11 +163,11 @@ push_to_talk = "Alt+Super"
 Voice hotkeys only support keys suitable for global shortcuts:
 
 - Supported: modifier-only combinations, such as `Alt+Super` and `Ctrl+Alt+Shift`.
-- Supported: standalone `Fn` on macOS and Linux; `Function` is also accepted as an alias. `Fn` cannot be combined with `F1`, digits, or other keys.
+- Supported: the `Fn` modifier on macOS and Linux; `Function` is also accepted as an alias. `Fn` can be combined with ordinary keys such as letters, but not with function keys `F1` through `F24`.
 - On Linux, evdev reads `Fn`; when no backend is specified, a hotkey using `Fn` automatically selects the evdev backend. If `--backend x11` is forced, use `--backend wayland` instead.
 - Supported: function keys `F1` through `F24`, such as `F9` and `Alt+F8`.
 - Supported: non-text control and navigation keys, such as `Tab`, `Enter`, `Escape`, `Backspace`, `CapsLock`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, and `Delete`.
-- Not supported: `Fn` combined with another key, or letters, digits, punctuation, Space, numpad digits, and numpad symbols that can enter text, such as `Fn+F5`, `Fn+1`, `Alt+G`, `G`, `Alt+1`, and `Alt+Space`.
+- Not supported: `Fn+F1` through `Fn+F24`, or letters, digits, punctuation, Space, numpad digits, and numpad symbols that can enter text without `Fn`, such as `Alt+G`, `G`, `Alt+1`, and `Alt+Space`.
 
 Hotword example:
 
@@ -180,8 +180,8 @@ macOS hotkey example:
 
 ```toml
 [voice]
-# Option is Alt; Command/Cmd is Super. Fn must be used alone.
-push_to_talk = "Fn"
+# Option is Alt; Command/Cmd is Super.
+push_to_talk = "Option+Command"
 ```
 
 On Windows, `Win` and `Super` both refer to the Windows logo key. If recording is unavailable, allow desktop applications to access the microphone under Windows Settings > Privacy & security > Microphone.

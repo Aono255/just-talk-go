@@ -237,12 +237,12 @@ func (m *Model) save() {
 		m.restorePushToTalkField()
 		return
 	}
-	if combo.Mods&hotkey.ModFn != 0 && combo.Key != hotkey.KeyNone {
-		m.logf("❌ Fn 不能与其他按键组合，请单独使用 Fn")
+	if combo.Mods&hotkey.ModFn != 0 && combo.Key.IsFunctionKey() {
+		m.logf("❌ Fn 不能与 F1-F24 等功能键组合")
 		m.restorePushToTalkField()
 		return
 	}
-	if combo.Key.IsTextKey() {
+	if combo.Key.IsTextKey() && combo.Mods&hotkey.ModFn == 0 {
 		m.logf("❌ 热键不支持普通字符键: %s", combo)
 		m.logf("   请使用 Alt+Super、F9、Alt+F8、Ctrl+Alt+Tab 等全局快捷键")
 		m.restorePushToTalkField()
@@ -278,7 +278,7 @@ func (m *Model) restorePushToTalkField() {
 
 func validVoiceHotkeyString(value string) bool {
 	combo, err := config.ParseHotkey(value)
-	return err == nil && (combo.Mods&hotkey.ModFn == 0 || combo.Key == hotkey.KeyNone) && !combo.Key.IsTextKey()
+	return err == nil && (combo.Mods&hotkey.ModFn == 0 || !combo.Key.IsFunctionKey()) && (combo.Mods&hotkey.ModFn != 0 || !combo.Key.IsTextKey())
 }
 
 func splitList(s string) []string {
