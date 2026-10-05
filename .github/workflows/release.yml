@@ -147,7 +147,7 @@ jobs:
         with:
           distribution: goreleaser
           version: ${{ env.GORELEASER_VERSION }}
-          args: release --clean -f .goreleaser.release.yaml
+          args: release --clean --allow-dirty -f .goreleaser.release.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
