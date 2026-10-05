@@ -33,7 +33,7 @@ func runPlatform(cfg *config.Config, backend string) Report {
 		},
 	}
 	if cfg.Voice.Enabled {
-		report.Checks = append(report.Checks, windowsASRConfigCheck(cfg))
+		report.Checks = append(report.Checks, asrEngineCheck(cfg, filepath.Clean(config.DefaultPath())))
 	}
 	return report
 }
@@ -55,26 +55,4 @@ func windowsMicrophoneCheck(cfg *config.Config) Check {
 		Name: "麦克风录音", OK: true, Severity: Required, Detail: detail,
 		Notes: []string{"首次录音失败时，请检查 Windows 麦克风隐私权限。"},
 	}
-}
-
-func windowsASRConfigCheck(cfg *config.Config) Check {
-	var missing []string
-	if strings.TrimSpace(cfg.Voice.AppKey) == "" {
-		missing = append(missing, "app_key")
-	}
-	if strings.TrimSpace(cfg.Voice.AccessKey) == "" {
-		missing = append(missing, "access_key")
-	}
-	resourceID := strings.TrimSpace(cfg.Voice.ResourceID)
-	if resourceID == "" {
-		resourceID = "volc.bigasr.sauc.duration"
-	}
-	if len(missing) > 0 {
-		return Check{
-			Name: "ASR 配置", OK: false, Severity: Warning,
-			Detail: "缺少 " + strings.Join(missing, ", "),
-			Fix:    "在 " + filepath.Clean(config.DefaultPath()) + " 的 [voice] 中填写 " + strings.Join(missing, ", ") + "。",
-		}
-	}
-	return Check{Name: "ASR 配置", OK: true, Severity: Warning, Detail: "resource_id=" + resourceID}
 }

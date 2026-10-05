@@ -68,6 +68,9 @@ func runPlatform(cfg *config.Config, backend string) Report {
 		accessibilityCheck(terminal),
 		recordingBackendCheck(terminal),
 	)
+	if cfg.Voice.Enabled {
+		report.Checks = append(report.Checks, asrEngineCheck(cfg, configPathForDisplay()))
+	}
 	return report
 }
 

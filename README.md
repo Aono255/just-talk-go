@@ -122,7 +122,7 @@ make install
 
 1. 获取豆包大模型语音识别凭证（App Key / Access Key）。
 2. 运行 `just-talk --doctor` 检查麦克风、剪贴板工具和权限。
-3. 运行 `just-talk` 打开 TUI，在 App Key、Access Key 字段填入凭证，按 `s` 保存。
+3. 运行 `just-talk` 打开 TUI，选中“引擎”回车选择渠道（默认豆包流式），在弹出的引擎配置中填入凭证，按 `s` 保存。
 4. 按 `push_to_talk` 热键（默认 `Alt+Super`；macOS 为 `Option+Command`）开始/停止录音。识别结果会复制到剪贴板，并在开启 `auto_submit` 时上屏到当前输入框。
 
 ### 权限
@@ -168,14 +168,14 @@ Windows 上低级键盘钩子只观察按键边沿，不消费、不回放修饰
 | 按键 | 行为 |
 | --- | --- |
 | `j` / `k` / 方向键 | 移动选中项 |
-| `e` / `i` / `Enter` | 编辑选中项（字符串字段进入输入；选项字段用 `j`/`k` 切换；布尔字段用 `Space` 切换） |
+| `e` / `i` / `Enter` | 编辑选中项（字符串字段进入输入；选项字段用 `j`/`k` 切换；布尔字段用 `Space` 切换）；“引擎”/“引擎配置”行回车打开弹层 |
 | `Enter` | 退出编辑并保存；`Esc` 仅退出编辑 |
 | `s` | 保存全部配置（即时生效，无需重启） |
 | `l` | 展开/收起日志区域 |
 | `h` | 帮助开关 |
 | `q` / `Ctrl+C` | 退出 |
 
-在 TUI 中修改 App Key 或 Access Key 后按 `s` 保存，下一次录音即使用新凭证；正在进行的识别仍使用建立连接时的凭证。
+在 TUI 中修改引擎或引擎凭证后按 `s` 保存，下一次录音即使用新配置；正在进行的识别仍使用建立连接时的配置。
 
 ## 配置
 
@@ -210,6 +210,14 @@ app_key = "your-app-key"
 access_key = "your-access-key"
 resource_id = "volc.bigasr.sauc.duration"
 hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+
+# 引擎：doubao-stream（豆包流式，默认）/ dashscope（千问 Fun-ASR 流式）
+#       openai / auralwise / mimo-asr（整段转写，无实时字幕）
+engine = "doubao-stream"
+# 各引擎的凭据与参数独立保存，互不影响：
+# [voice.engine_configs.dashscope]
+# api_key = "sk-..."
+# model = "fun-asr-realtime"
 
 [overlay]
 enabled = true

@@ -122,7 +122,7 @@ If the install directory is not on your `PATH`, follow the hint printed by the c
 
 1. Obtain Doubao large-model ASR credentials (App Key / Access Key).
 2. Run `just-talk --doctor` to check the microphone, clipboard tools, and permissions.
-3. Run `just-talk` to open the TUI, fill in the App Key and Access Key fields, and press `s` to save.
+3. Run `just-talk` to open the TUI, press Enter on “引擎” to pick a channel (Doubao streaming by default), fill in credentials in the engine config modal, then press `s` to save.
 4. Press the `push_to_talk` hotkey (default `Alt+Super`; `Option+Command` on macOS) to start/stop recording. Recognized text is copied to the clipboard and, when `auto_submit` is on, submitted into the focused field.
 
 ### Permissions
@@ -175,7 +175,7 @@ On Windows, the low-level keyboard hook only observes key edges and never consum
 | `h` | Toggle help |
 | `q` / `Ctrl+C` | Quit |
 
-After changing the App Key or Access Key in the TUI, press `s` to save — the next recording uses the new credentials. An in-progress session keeps the credentials used to establish its connection.
+After changing the engine or its credentials in the TUI, press `s` to save — the next recording uses the new configuration. An in-progress session keeps the configuration used to establish its connection.
 
 ## Configuration
 
@@ -210,6 +210,14 @@ app_key = "your-app-key"
 access_key = "your-access-key"
 resource_id = "volc.bigasr.sauc.duration"
 hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+
+# Engine: doubao-stream (default, Doubao streaming) / dashscope (Qwen Fun-ASR streaming)
+#         openai / auralwise / mimo-asr (batch transcription, no live captions)
+engine = "doubao-stream"
+# Per-engine credentials are kept separately and never clobber each other:
+# [voice.engine_configs.dashscope]
+# api_key = "sk-..."
+# model = "fun-asr-realtime"
 
 [overlay]
 enabled = true

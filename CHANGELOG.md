@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Add multi-engine ASR support behind a pluggable engine registry. `[voice] engine` selects `doubao-stream` (default), `dashscope` (Qwen Fun-ASR realtime streaming), or batch engines `openai`, `auralwise`, `mimo-asr`; per-engine credentials live under `[voice.engine_configs.<engine>]` and are kept separately. Streaming engines keep live captions; batch engines produce only the final result. Existing Doubao credentials keep working unchanged.
+- TUI gains an engine picker and per-engine config modal: select 引擎 → Enter to choose a channel, then configure its keys in the follow-up modal; `o` opens the engine's documentation.
 - Add a macOS notch overlay. It is the new macOS default (`[overlay] position = "notch"`) and shows live recognized text, mic level, and a short pasted/copied result after each finished session. Cancelled or empty sessions show no result. The overlay follows the screen under the mouse pointer, picked at the start of each recording and kept for that recording, so no extra permission is needed. Screens without a notch show a top-center status capsule instead. Existing configs that set `position` explicitly keep it until changed in the TUI or by hand. Linux, Windows, and other macOS positions keep the original status capsule.
 - Add `[overlay] show_text` (default `true`) to hide recognized text in the notch overlay.
 - Refresh the macOS notch text as soon as a new partial ASR result arrives instead of on the next polling tick. New text replaces the old with a roughly 100 ms fade and no typewriter delay. ASR service latency itself is unchanged.

@@ -35,6 +35,8 @@ const (
 	fString fieldType = iota
 	fToggle
 	fSelect
+	// fAction renders as a value row that opens a modal on enter (no edit mode).
+	fAction
 )
 
 type field struct {
@@ -46,6 +48,10 @@ type field struct {
 	boolVal bool
 	opts    []string
 	optIdx  int
+	// required marks a must-fill key in engine config modals (label gets *).
+	required bool
+	// secret masks value when not editing (API keys).
+	secret bool
 }
 
 type Model struct {
@@ -63,6 +69,12 @@ type Model struct {
 	editing     bool
 	helpVisible bool
 	logExpanded bool
+	// overlay modal state (engine picker / engine config); overlayNone = main form
+	overlay   overlayState
+	pickerIdx int
+	ecFields  []field
+	ecCursor  int
+	ecEditing bool
 }
 
 func New(cfg *config.Config) *Model {
@@ -73,8 +85,9 @@ func New(cfg *config.Config) *Model {
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
-		{label: "App Key", key: "app_key", help: "火山 App ID", fType: fString, input: ti(vc.AppKey)},
-		{label: "Access Key", key: "access_key", help: "火山 Access Token", fType: fString, input: ti(vc.AccessKey)},
+		{label: "引擎", key: "engine", help: "回车选择识别引擎；流式引擎支持实时字幕", fType: fAction},
+		{label: "引擎配置", key: "engine_config", help: "回车配置当前引擎的凭据与参数；各引擎独立保存", fType: fAction},
+		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 引擎默认", fType: fString, input: ti(vc.Language)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
@@ -132,6 +145,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	k := msg.String()
 
+	// Modal overlays capture all input while open.
+	if m.overlay != overlayNone {
+		if m.handleOverlayKey(msg) {
+			return nil
+		}
+	}
+
 	// Editing a field
 	if m.editing && m.cursor >= 0 && m.cursor < len(m.fields) {
 		f := &m.fields[m.cursor]
@@ -187,6 +207,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.save()
 		return nil
 	case "e", "i", "enter":
+		if m.cursor >= 0 && m.cursor < len(m.fields) && m.fields[m.cursor].fType == fAction {
+			switch m.fields[m.cursor].key {
+			case "engine":
+				m.openEnginePicker()
+			case "engine_config":
+				m.openEngineConfig()
+			}
+			return nil
+		}
 		m.editing = true
 		if m.cursor < 0 {
 			m.cursor = 0
@@ -232,10 +261,8 @@ func (m *Model) save() {
 			vc.PushToTalk = f.input.Value()
 		case "mode":
 			vc.Mode = f.opts[f.optIdx]
-		case "app_key":
-			vc.AppKey = f.input.Value()
-		case "access_key":
-			vc.AccessKey = f.input.Value()
+		case "language":
+			vc.Language = strings.TrimSpace(f.input.Value())
 		case "auto_submit":
 			vc.AutoSubmit = f.boolVal
 		case "stop_delay_ms":
@@ -369,7 +396,14 @@ func (m *Model) View() string {
 		}
 	}
 	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | h 帮助 | esc 退出编辑 | s 保存 | q 退出"))
-	return b.String()
+	view := b.String()
+	switch m.overlay {
+	case overlayPicker:
+		view = compositeOver(view, m.renderPicker(), m.w, m.h)
+	case overlayEngineConfig:
+		view = compositeOver(view, m.renderEngineConfig(), m.w, m.h)
+	}
+	return view
 }
 
 func (m *Model) renderVoiceStats() string {
@@ -467,6 +501,24 @@ func (m *Model) renderVoiceStatus() string {
 func (m *Model) renderField(i int, f field) string {
 	editing := m.editing && m.cursor == i
 	switch f.fType {
+	case fAction:
+		switch f.key {
+		case "engine":
+			meta := metaFor(m.currentEngine())
+			var tag string
+			if meta.streaming {
+				tag = aStyle.Render(" [流式]")
+			} else {
+				tag = dStyle.Render(" [整段]")
+			}
+			return vStyle.Render(meta.name) + tag + " " + dStyle.Render("(回车选择)")
+		case "engine_config":
+			engine := m.currentEngine()
+			if engineConfigured(m.cfg.Voice, engine) {
+				return aStyle.Render("已配置") + " " + dStyle.Render("(回车修改)")
+			}
+			return wStyle.Render("缺少必填项") + " " + dStyle.Render("(回车配置)")
+		}
 	case fString:
 		v := f.input.Value()
 		if f.key == "access_key" && !editing && len(v) > 8 {

@@ -31,18 +31,57 @@ type OverlayConfig struct {
 }
 
 type VoiceConfig struct {
-	Enabled     bool     `toml:"enabled"`
-	Mode        string   `toml:"mode"`
-	PushToTalk  string   `toml:"push_to_talk"`
-	Device      string   `toml:"device"`
-	Gain        int      `toml:"gain"`
-	StopDelayMs int      `toml:"stop_delay_ms"`
-	Language    string   `toml:"language"`
-	AutoSubmit  bool     `toml:"auto_submit"`
-	AppKey      string   `toml:"app_key"`
-	AccessKey   string   `toml:"access_key"`
-	ResourceID  string   `toml:"resource_id"`
-	Hotwords    []string `toml:"hotwords"`
+	Enabled     bool   `toml:"enabled"`
+	Mode        string `toml:"mode"`
+	PushToTalk  string `toml:"push_to_talk"`
+	Device      string `toml:"device"`
+	Gain        int    `toml:"gain"`
+	StopDelayMs int    `toml:"stop_delay_ms"`
+	Language    string `toml:"language"`
+	AutoSubmit  bool   `toml:"auto_submit"`
+	// Engine 语音引擎类型；留空时使用默认引擎。
+	Engine string `toml:"engine"`
+	// EngineConfigs 按引擎类型分组保存私有配置。
+	EngineConfigs map[string]map[string]string `toml:"engine_configs"`
+	// EngineConfig 旧版平铺引擎配置，仅作为读取回退。
+	EngineConfig map[string]string `toml:"engine_config"`
+	AppKey       string            `toml:"app_key"`
+	AccessKey    string            `toml:"access_key"`
+	ResourceID   string            `toml:"resource_id"`
+	Hotwords     []string          `toml:"hotwords"`
+}
+
+// EngineConfigFor 返回指定引擎的私有配置；未分组时回退旧版平铺配置。
+func (vc VoiceConfig) EngineConfigFor(engine string) map[string]string {
+	if per, ok := vc.EngineConfigs[engine]; ok {
+		return per
+	}
+	if vc.EngineConfig != nil && len(vc.EngineConfig) > 0 {
+		return vc.EngineConfig
+	}
+	return nil
+}
+
+// SetEngineConfig 写入指定引擎的私有配置，并返回配置是否发生变化。
+func (vc *VoiceConfig) SetEngineConfig(engine string, cfg map[string]string) bool {
+	if vc.EngineConfigs == nil {
+		vc.EngineConfigs = map[string]map[string]string{}
+	}
+	old := vc.EngineConfigs[engine]
+	vc.EngineConfigs[engine] = cfg
+	return !equalStringMap(old, cfg)
+}
+
+func equalStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func Default() *Config {

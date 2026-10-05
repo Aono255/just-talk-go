@@ -17,8 +17,10 @@ import (
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/engine"
 	"github.com/c/just-talk-go/hotkey"
+	"github.com/c/just-talk-go/internal/asrcfg"
 	"github.com/c/just-talk-go/internal/autotype"
 	"github.com/c/just-talk-go/internal/clipboard"
+	"github.com/c/just-talk-go/internal/speech"
 )
 
 const (
@@ -259,7 +261,7 @@ type VoicePlugin struct {
 	sessionID              uint64
 	sessionGen             uint64
 	recorder               *Recorder
-	asrClient              *ASRClient
+	asrClient              speech.StreamSession
 	asrCancel              context.CancelFunc
 	audioDone              <-chan struct{}
 	autoSubmit             bool
@@ -279,7 +281,7 @@ type VoicePlugin struct {
 type recordingSession struct {
 	sessionID   uint64
 	recorder    *Recorder
-	asrClient   *ASRClient
+	asrClient   speech.StreamSession
 	asrCancel   context.CancelFunc
 	audioDone   <-chan struct{}
 	autoSubmit  bool
@@ -527,13 +529,6 @@ func (p *VoicePlugin) startRecording() {
 		return
 	}
 	vc := p.cfg.Voice
-	asrCfg := ASRConfig{AppKey: vc.AppKey, AccessKey: vc.AccessKey, ResourceID: vc.ResourceID, Language: vc.Language, Hotwords: vc.Hotwords}
-	if asrCfg.ResourceID == "" {
-		asrCfg.ResourceID = "volc.bigasr.sauc.duration"
-	}
-	if asrCfg.Language == "" {
-		asrCfg.Language = "zh-CN"
-	}
 	var rec *Recorder
 	if vc.Device != "" {
 		rec = NewRecorderWithDevice(p.logger, vc.Device, vc.Gain)
@@ -567,15 +562,28 @@ func (p *VoicePlugin) startRecording() {
 	p.publishStatusLocked()
 	p.mu.Unlock() // Release lock before slow WebSocket dial
 
-	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, asrCfg)
+	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec)
 	if shouldStopImmediately {
 		p.startStopDelay()
 	}
 }
 
-func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, asrCfg ASRConfig) {
-	client := NewASRClient(asrCfg, p.logger)
-	if err := client.Connect(ctx); err != nil {
+func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder) {
+	vc := p.cfg.Voice
+	eng, err := asrcfg.Build(vc)
+	params := speech.StreamParams{Lang: vc.Language, Hotwords: vc.Hotwords}
+	var client speech.StreamSession
+	if err == nil {
+		if streaming, ok := eng.(speech.StreamingEngine); ok {
+			client, err = streaming.NewStream(ctx, params)
+		} else {
+			client = speech.NewBatchSession(eng, params)
+		}
+	}
+	if err == nil {
+		err = client.Connect(ctx)
+	}
+	if err != nil {
 		wasCanceled := ctx.Err() != nil
 		cancel()
 		p.mu.Lock()
@@ -613,7 +621,6 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	p.publishStatusLocked()
 	p.mu.Unlock()
 
-	go client.ReceiveLoop(ctx)
 	go func() {
 		defer close(audioDone)
 		p.streamAudio(ctx, rec, client)
@@ -1034,7 +1041,8 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client *ASRClient) {
+// streamAudio forwards recorder PCM to the active speech session.
+func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession) {
 	buf := make([]byte, 6400)
 	for {
 		select {
