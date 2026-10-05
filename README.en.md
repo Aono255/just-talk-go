@@ -18,6 +18,16 @@ Just Talk is a desktop voice input tool. Press a global hotkey to record; audio 
 
 ![Just Talk TUI](docs/screenshot-tui.png)
 
+## macOS Notch Overlay
+
+On macOS, the recording indicator expands straight out of the notch: live recognized text appears as you speak with a typewriter-style reveal, alongside a mic-level waveform; when recognition finishes, it lingers to show the final text and the "copied / auto-submitted" state.
+
+![macOS notch overlay on real hardware: live recognized text and mic-level waveform while recording](docs/assets/notch-live.gif)
+
+![macOS notch overlay on real hardware: copied state after recognition finishes](docs/assets/notch-live-final.png)
+
+On displays without a notch (external monitors or notch-less models) it falls back to a top-center status capsule. Enable it via `position = "notch"` or the overlay position field in the TUI; see [Configuration](#configuration) for behavior details.
+
 ## Features
 
 - Global hotkey recording with `toggle` (press to start, press again to stop) and `hold` (push-to-talk) modes.
@@ -170,7 +180,7 @@ After changing the App Key or Access Key in the TUI, press `s` to save — the n
 ## Configuration
 
 <details>
-<summary>Config file paths, recommended config, and macOS notch overlay behavior</summary>
+<summary>Config file paths and recommended config</summary>
 
 Default config path:
 
@@ -215,20 +225,7 @@ enabled = false
 hotkeys = []                       # extra hotkeys registered by the debug plugin
 ```
 
-### macOS notch overlay
-
-Real-device preview of the macOS notch overlay (overlay area only, no desktop content):
-
-![macOS notch overlay on real hardware: live recognized text, timer, and mic level while recording](docs/assets/notch-live.gif)
-
-![macOS notch overlay on real hardware: copied indicator after recognition finishes](docs/assets/notch-live-final.png)
-
-- With `position = "notch"`, the indicator expands
-- Notch text is driven by recognition results: each new partial result refreshes immediately, replacing the old text whole with a roughly 100 ms fade — no typewriter effect. This only removes overlay-side waiting; ASR latency is unchanged.
-- Screen selection: the overlay picks the screen under the mouse pointer on the first display of each recording and sticks to it for that recording. If the display is disconnected it re-picks by pointer position, falling back to the main screen. On a screen without a notch (external displays, older Macs) the status capsule appears at top-center instead, without text.
-- Also adjustable in the TUI: select the overlay position field, press `e` to edit, `j`/`k` to cycle, `Enter` to save — it takes effect immediately.
-- `[overlay]` changes apply without restarting: `enabled` toggles the overlay instantly, `show_text`/`idle_visible` apply on the next refresh, and `position`/`scale` rebuild the overlay window.
-- Existing configs that set `position` explicitly are not migrated; set it to `"notch"` in the TUI or by hand. On Linux/Windows `"notch"` behaves as `top-center`, and other positions keep the original capsule with no text display.
+`position = "notch"` (the macOS default) expands the indicator from the notch, and `show_text` controls whether live/final text is shown inside it; the overlay sticks to the screen under the mouse pointer, and a screen without a notch falls back to a top-center capsule (no text). On Linux/Windows `"notch"` behaves as `top-center`. See [macOS Notch Overlay](#macos-notch-overlay) above for previews and the visual behavior. In the TUI, select the overlay position field, press `e` to edit, `j`/`k` to cycle, and `Enter` to save — it applies immediately. Existing configs that set `position` explicitly are not migrated.
 
 </details>
 
@@ -273,30 +270,6 @@ JUST_TALK_TEST_WINDOWS_HOTKEY=1 go test ./hotkey -run TestWindowsHookIntegration
 ```
 
 In TUI mode, normal logs go to the log file and the in-app log area so they do not corrupt the Bubble Tea layout; debug details are only visible with `--debug`.
-
-</details>
-
-## Release Process
-
-<details>
-<summary>Release pipeline and Homebrew auto-update</summary>
-
-Releases are driven by `.goreleaser.yaml` and `.github/workflows/release.yml` using GoReleaser v2 with the official `goreleaser/goreleaser-action`. Pushing a `v*` tag builds Linux, macOS, and Windows binaries natively on matching GitHub-hosted runners (cgo on Linux/macOS), then a publish job merges the archives and attaches them plus `SHA256SUMS.txt` to a GitHub Release:
-
-```bash
-git tag v0.4.0
-git push origin v0.4.0
-```
-
-### Homebrew auto-update (optional)
-
-Building and publishing the GitHub Release does not depend on the Homebrew tap; the two are independent. To have the release workflow also update the formula in [wakaka6/homebrew-tap](https://github.com/wakaka6/homebrew-tap) (covering macOS and Linux, arm64/amd64), configure the following on the repository:
-
-1. Create (or reuse) the tap repository `wakaka6/homebrew-tap` with a `Formula/` directory.
-2. In `wakaka6/just-talk-go`, under Settings → Secrets and variables → Actions, create the secret `HOMEBREW_TAP_TOKEN`: a token with `contents: write` permission on the tap repository (a fine-grained PAT scoped to that repo is enough).
-3. Optionally create the repository variable `HOMEBREW_TAP_REPOSITORY` set to `<owner>/<repo>`; when omitted it defaults to `wakaka6/homebrew-tap`.
-
-If `HOMEBREW_TAP_TOKEN` is not configured, the workflow skips the Homebrew update with a warning and the GitHub Release is still published normally.
 
 </details>
 

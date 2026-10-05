@@ -18,6 +18,16 @@ Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快�
 
 ![Just Talk TUI](docs/screenshot-tui.png)
 
+## macOS 刘海浮层
+
+在 macOS 上，录音提示直接从刘海展开：实时识别文字随语音流式显现（打字机式逐段展开），旁边同步显示麦克风音量波形；识别完成后停留展示最终文字与“已复制 / 已上屏”状态。
+
+![macOS 实机刘海浮层：录音中的实时识别文字与音量波形](docs/assets/notch-live.gif)
+
+![macOS 实机刘海浮层：识别完成后的已复制状态](docs/assets/notch-live-final.png)
+
+屏幕没有刘海（外接显示器或无刘海机型）时自动回退为顶部居中的状态胶囊。通过 `position = "notch"` 或 TUI 的“提示位置”启用，行为细节见 [配置](#配置)。
+
 ## 功能
 
 - 全局快捷键录音，支持 `toggle`（按一下开始、再按一下停止）和 `hold`（按住说话）两种模式。
@@ -170,7 +180,7 @@ Windows 上低级键盘钩子只观察按键边沿，不消费、不回放修饰
 ## 配置
 
 <details>
-<summary>展开查看配置文件路径、推荐配置与 macOS 刘海浮层行为</summary>
+<summary>展开查看配置文件路径与推荐配置</summary>
 
 默认配置路径：
 
@@ -215,20 +225,7 @@ enabled = false
 hotkeys = []                       # 调试插件额外注册的热键
 ```
 
-### macOS 刘海浮层
-
-以下为 macOS 实机刘海浮层预览（仅浮层区域，不含桌面内容）：
-
-![macOS 实机刘海浮层：录音中的实时识别文字、计时与麦克风音量](docs/assets/notch-live.gif)
-
-![macOS 实机刘海浮层：识别完成后的已复制状态](docs/assets/notch-live-final.png)
-
-- `position = "notch"` 时，提示从刘海处展开
-- 刘海文字由识别结果驱动刷新：收到新的中间结果立即更新，整段以约 100ms 淡入替换，不逐字打字。这只减少浮层的显示等待，不影响 ASR 返回速度。
-- 屏幕选择：每次录音首次显示时选择鼠标所在屏幕并在本轮录音期间固定；屏幕断开则按鼠标位置重选，找不到时回退到主屏幕。选中的屏幕没有刘海（外接显示器或无刘海 Mac）时，在该屏顶部居中显示状态胶囊，不显示文字。
-- 在 TUI 中修改：选中“提示位置”，按 `e` 进入编辑，`j`/`k` 切换，`Enter` 保存，立即生效。
-- `[overlay]` 配置保存后立即生效：`enabled` 即时开关，`show_text`/`idle_visible` 下一次刷新生效，`position`/`scale` 会重建浮层窗口。
-- 已有配置文件里显式写了 `position` 的不会被迁移；要启用刘海样式请在 TUI 或配置中改为 `"notch"`。Linux / Windows 上 `"notch"` 按 `top-center` 处理，其余位置与原状态胶囊一致，不显示文字。
+`position = "notch"`（macOS 默认）让提示从刘海展开，`show_text` 控制刘海内是否显示实时/最终文字；浮层固定在鼠标所在屏幕，屏幕无刘海时回退为顶部居中胶囊（不显示文字），Linux / Windows 上 `"notch"` 按 `top-center` 处理。预览与效果说明见上文 [macOS 刘海浮层](#macos-刘海浮层)。在 TUI 中选中“提示位置”按 `e` 进入编辑、`j`/`k` 切换、`Enter` 保存即可即时修改；已有配置中显式写了 `position` 的不会被迁移。
 
 </details>
 
@@ -273,30 +270,6 @@ JUST_TALK_TEST_WINDOWS_HOTKEY=1 go test ./hotkey -run TestWindowsHookIntegration
 ```
 
 TUI 模式下普通日志只写入日志文件与界面内的日志区域，避免破坏 Bubble Tea 布局；调试详情仅在 `--debug` 时可见。
-
-</details>
-
-## 发布流程
-
-<details>
-<summary>展开查看发布流程与 Homebrew 自动更新</summary>
-
-发布由 `.goreleaser.yaml` 和 `.github/workflows/release.yml` 驱动，使用 GoReleaser v2 与官方 `goreleaser/goreleaser-action`。推送 `v*` 标签后，Linux、macOS、Windows 二进制在对应的 GitHub 托管 runner 上原生构建（Linux/macOS 为 cgo 构建），归档上传后由发布任务合并并附加 `SHA256SUMS.txt` 到 GitHub Release：
-
-```bash
-git tag v0.4.0
-git push origin v0.4.0
-```
-
-### Homebrew 自动更新（可选）
-
-GitHub Release 的构建与发布不依赖 Homebrew tap，两者相互独立。要让发布流程同时把 Formula（覆盖 macOS 与 Linux，arm64/amd64）更新到 [wakaka6/homebrew-tap](https://github.com/wakaka6/homebrew-tap)，需要以下仓库配置：
-
-1. 创建（或复用）tap 仓库 `wakaka6/homebrew-tap`，内含 `Formula/` 目录。
-2. 在 `wakaka6/just-talk-go` 的 Settings → Secrets and variables → Actions 中创建 secret `HOMEBREW_TAP_TOKEN`：一个对 tap 仓库拥有 `contents: write` 权限的 token（细粒度 PAT 即可，授权范围只需该仓库）。
-3. 可选：创建 repository variable `HOMEBREW_TAP_REPOSITORY`，值为 `<owner>/<repo>`；省略时默认为 `wakaka6/homebrew-tap`。
-
-未配置 `HOMEBREW_TAP_TOKEN` 时，workflow 会跳过 Homebrew 更新并输出警告，GitHub Release 仍正常发布。
 
 </details>
 
