@@ -1,0 +1,35 @@
+version: 2
+
+# Publish-only configuration used by the release workflow's "release" job
+# (.github/workflows/release.yml). GoReleaser OSS cannot merge artifacts across
+# runners, so .goreleaser.yaml builds one native archive per matrix job and this
+# file runs once on the tag: it checksums the downloaded archives in dist/ and
+# creates the GitHub Release with all archives plus SHA256SUMS.txt.
+project_name: just-talk
+
+builds:
+  # Never build here; archives arrive from the matrix jobs via dist/.
+  - id: publish
+    main: ./cmd/just-talk
+    binary: just-talk
+    goos: [linux]
+    goarch: [amd64]
+    skip: "true"
+checksum:
+  name_template: "SHA256SUMS.txt"
+  # Archives built by the matrix jobs are downloaded into release-artifacts/.
+  # They cannot live in dist/: goreleaser requires dist/ to be empty at start
+  # and --clean would delete them.
+  extra_files:
+    - glob: ./release-artifacts/*.tar.gz
+    - glob: ./release-artifacts/*.zip
+
+changelog:
+  # Equivalent of the previous `gh release create --generate-notes`.
+  use: github-native
+
+release:
+  prerelease: auto
+  extra_files:
+    - glob: ./release-artifacts/*.tar.gz
+    - glob: ./release-artifacts/*.zip

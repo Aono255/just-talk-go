@@ -124,4 +124,4 @@ TUI mode must not write normal logs to stdout/stderr because it corrupts the Bub
 - Keep user-facing doctor output short and action-oriented. Do not list implementation details as checks unless the user can act on them.
 - README is bilingual: update both `README.md` and `README.en.md`.
 - `CHANGELOG.md` should be updated for user-visible behavior changes.
-- The project does not accept pull requests; issues are welcome.
+- Pull requests are welcome; see CONTRIBUTING.md for the contribution workflow.

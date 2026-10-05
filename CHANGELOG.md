@@ -4,6 +4,11 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Add a macOS notch overlay. It is the new macOS default (`[overlay] position = "notch"`) and shows live recognized text, mic level, and a short pasted/copied result after each finished session. Cancelled or empty sessions show no result. The overlay follows the screen under the mouse pointer, picked at the start of each recording and kept for that recording, so no extra permission is needed. Screens without a notch show a top-center status capsule instead. Existing configs that set `position` explicitly keep it until changed in the TUI or by hand. Linux, Windows, and other macOS positions keep the original status capsule.
+- Add `[overlay] show_text` (default `true`) to hide recognized text in the notch overlay.
+- Refresh the macOS notch text as soon as a new partial ASR result arrives instead of on the next polling tick. New text replaces the old with a roughly 100 ms fade and no typewriter delay. ASR service latency itself is unchanged.
+- Add an overlay position option (`提示位置`) to the TUI. It writes `[overlay] position` (`notch`, `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, `bottom-right`) when saved. Saving other TUI settings keeps an explicitly configured position.
+- Apply `[overlay]` config changes without restarting: `enabled` starts or stops the overlay, `show_text` and `idle_visible` apply on the next refresh, and `position` or `scale` changes replace the overlay window, which then shows the current recording state.
 - Add macOS and Linux `Fn`/`Function` hotkey support. `Fn` can combine with ordinary keys, while `Fn+F1` through `Fn+F24` remain unsupported because macOS may treat them as system controls.
 - Fix TUI configuration reloads retaining old ASR credentials: after saving with `s`, the next recording uses the updated App Key and Access Key without restarting.
 - Add a responsive Chinese project introduction website with a simulated recording and R-triggered retry demo, platform-specific launch commands, static HTTP preview on port 7788, and automated GitHub Pages deployment linked from both READMEs.

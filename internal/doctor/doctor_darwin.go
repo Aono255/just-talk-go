@@ -276,7 +276,7 @@ func overlayPosition(cfg *config.Config) string {
 	if strings.TrimSpace(cfg.Overlay.Position) != "" {
 		return cfg.Overlay.Position
 	}
-	return "bottom-center"
+	return config.DefaultOverlayPosition()
 }
 
 func runCommand(name string, args ...string) (string, error) {

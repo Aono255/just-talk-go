@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25.x"
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-24.04
+            goos: linux
+            cgo_enabled: "1"
+          - name: macOS
+            runner: macos-15
+            goos: darwin
+            cgo_enabled: "1"
+          - name: Windows
+            runner: windows-2025
+            goos: windows
+            cgo_enabled: "0"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install Linux native dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libwayland-dev \
+            libx11-dev \
+            libxext-dev \
+            libxinerama-dev \
+            libxrender-dev \
+            libxtst-dev
+
+      - name: Test
+        env:
+          CGO_ENABLED: ${{ matrix.cgo_enabled }}
+        run: go test ./...

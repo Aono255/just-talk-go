@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Just Talk</title>
-  <desc id="desc">A microphone with voice waves and a spark.</desc>
+  <title id="title">Just Talk 图标 D · 醒目麦克风与声波火花</title>
+  <desc id="desc">深色圆角方形背景上，白色粗线条麦克风居中，左上两道绿色声波弧线，右上一枚绿色四角火花。</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#14171c"/>
@@ -19,5 +19,6 @@
   <path d="M392 84c6 20 18 32 38 38-20 6-32 18-38 38-6-20-18-32-38-38 20-6 32-18 38-38Z" fill="url(#wave)"/>
   <rect x="214" y="118" width="84" height="140" rx="42" fill="#f2f5f7"/>
   <path d="M172 264a84 84 0 0 0 168 0" fill="none" stroke="#f2f5f7" stroke-width="18" stroke-linecap="round"/>
-  <path d="M256 348v44M206 404h100" fill="none" stroke="#f2f5f7" stroke-width="18" stroke-linecap="round"/>
+  <path d="M256 348v44" fill="none" stroke="#f2f5f7" stroke-width="18" stroke-linecap="round"/>
+  <path d="M206 404h100" fill="none" stroke="#f2f5f7" stroke-width="18" stroke-linecap="round"/>
 </svg>

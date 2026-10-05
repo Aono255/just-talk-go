@@ -146,13 +146,13 @@ func newWaylandBackend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *waylandBackend) Show(label string, color statusColor) error {
+func (b *waylandBackend) Show(f frame) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.display == nil || b.closed || b.destroyed {
 		return nil
 	}
-	b.draw(label, color)
+	b.draw(f.Label, f.Color)
 	C.wl_surface_attach(b.surface, b.buffer, 0, 0)
 	C.wl_surface_damage_buffer(b.surface, 0, 0, C.int32_t(b.w), C.int32_t(b.h))
 	C.wl_surface_commit(b.surface)
@@ -411,7 +411,7 @@ func (b *waylandBackend) anchor() int {
 	switch strings.ToLower(b.position) {
 	case "top-left":
 		return C.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | C.ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
-	case "top-center":
+	case "top-center", "notch":
 		return C.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
 	case "bottom-left":
 		return C.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | C.ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
@@ -428,7 +428,7 @@ func (b *waylandBackend) margins() (top, right, bottom, left int) {
 	switch strings.ToLower(b.position) {
 	case "top-left":
 		return b.margin, 0, 0, b.margin
-	case "top-center":
+	case "top-center", "notch":
 		return b.margin, 0, 0, 0
 	case "bottom-left":
 		return 0, 0, b.margin, b.margin

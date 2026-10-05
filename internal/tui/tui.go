@@ -68,6 +68,7 @@ type Model struct {
 func New(cfg *config.Config) *Model {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
+	positions := overlayPositionOptions(cfg.Overlay.Position)
 	fs := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
@@ -77,8 +78,20 @@ func New(cfg *config.Config) *Model {
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+		{label: "提示位置", key: "overlay_position", help: "notch 为 macOS 刘海，其他平台按 top-center 处理；保存后立即生效", fType: fSelect, opts: positions, optIdx: idxOf(positions, cfg.Overlay.Position)},
 	}
 	return &Model{cfg: cfg, fields: fs, logs: make([]string, 0, 100), cursor: -1, showLogs: true}
+}
+
+var overlayPositions = []string{"notch", "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"}
+
+// overlayPositionOptions keeps a configured value outside the known list
+// selectable, so saving from the TUI never rewrites it silently.
+func overlayPositionOptions(current string) []string {
+	if idx := idxOf(overlayPositions, current); overlayPositions[idx] == current {
+		return overlayPositions
+	}
+	return append(append([]string(nil), overlayPositions...), current)
 }
 
 func (m *Model) SetDebug(debug bool) {
@@ -229,6 +242,8 @@ func (m *Model) save() {
 			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 		case "hotwords":
 			vc.Hotwords = splitList(f.input.Value())
+		case "overlay_position":
+			next.Overlay.Position = f.opts[f.optIdx]
 		}
 	}
 	combo, err := config.ParseHotkey(vc.PushToTalk)
@@ -248,6 +263,7 @@ func (m *Model) save() {
 		m.restorePushToTalkField()
 		return
 	}
+	positionChanged := next.Overlay.Position != m.cfg.Overlay.Position
 	m.cfg = &next
 	if err := config.Save(m.cfg); err != nil {
 		m.logf("保存失败: %s", err)
@@ -255,6 +271,9 @@ func (m *Model) save() {
 		m.logf("✅ 配置已保存到 %s", config.FindConfig())
 	}
 	m.logf("  push_to_talk=%s", vc.PushToTalk)
+	if positionChanged {
+		m.logf("  overlay.position=%s", next.Overlay.Position)
+	}
 	if m.OnSave != nil {
 		if err := m.OnSave(m.cfg); err != nil {
 			m.logf("❌ 热键注册失败: %s", err)
@@ -464,6 +483,9 @@ func (m *Model) renderField(i int, f field) string {
 		return dStyle.Render("○ 关  (空格)")
 	case fSelect:
 		v := f.opts[f.optIdx]
+		if v == "" {
+			v = "(未设置)"
+		}
 		if editing {
 			return aStyle.Render("[" + v + " ▲▼]")
 		}

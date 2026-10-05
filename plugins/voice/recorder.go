@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 )
 
 // Recorder captures audio from the default microphone as PCM 16kHz 16bit mono.
@@ -21,6 +23,7 @@ type Recorder struct {
 	drainBuf bytes.Buffer
 	started  bool
 	backend  string
+	level    atomic.Uint64 // math.Float64bits of the last read chunk's level
 }
 
 func NewRecorder(logger *slog.Logger, gain int) *Recorder {
@@ -38,6 +41,9 @@ func NewRecorderWithDevice(logger *slog.Logger, device string, gain int) *Record
 }
 
 func (r *Recorder) Backend() string { return r.backend }
+
+// Level returns the mic level 0..1 of the most recently read audio chunk.
+func (r *Recorder) Level() float64 { return math.Float64frombits(r.level.Load()) }
 
 func (r *Recorder) Start() error {
 	r.mu.Lock()
@@ -79,6 +85,9 @@ func (r *Recorder) Read(p []byte) (int, error) {
 	n, err := stdout.Read(p)
 	if n > 0 && r.gain > 1 {
 		applyGain(p[:n], r.gain)
+	}
+	if n > 0 {
+		r.level.Store(math.Float64bits(pcmLevel(p[:n])))
 	}
 	if errors.Is(err, os.ErrClosed) {
 		err = io.EOF

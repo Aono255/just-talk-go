@@ -120,34 +120,107 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
       - name: Download archives
         uses: actions/download-artifact@v7
         with:
           pattern: release-*
-          path: dist
+          path: release-artifacts
           merge-multiple: true
 
-      - name: Generate checksums
-        working-directory: dist
-        run: sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+      # The publish-only config checksums the archives in release-artifacts/
+      # into dist/SHA256SUMS.txt, creates the GitHub Release, and uploads all
+      # of it. Archives stay out of dist/ because goreleaser requires it to be
+      # empty (and --clean would delete it).
+      - name: Publish release with GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --clean -f .goreleaser.release.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish release
+  # Publishes/updates Formula/just-talk.rb in the Homebrew tap repository.
+  #
+  # Required configuration on this repository:
+  #   - secret   HOMEBREW_TAP_TOKEN       PAT with `contents` write on the tap repo
+  #   - variable HOMEBREW_TAP_REPOSITORY  tap repo, e.g. "wakaka6/homebrew-tap"
+  # If the variable is unset, the token is missing, or the tap repository does
+  # not exist yet, this job warns and skips instead of failing the release.
+  homebrew:
+    name: Update Homebrew formula
+    needs: release
+    runs-on: ubuntu-24.04
+    env:
+      TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'wakaka6/homebrew-tap' }}
+
+    steps:
+      - name: Check tap configuration
+        id: tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN secret is not set; skipping Homebrew tap update."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! gh api "repos/${TAP_REPOSITORY}" --silent 2>/dev/null; then
+            echo "::warning::tap repository ${TAP_REPOSITORY} is not reachable with HOMEBREW_TAP_TOKEN; skipping Homebrew tap update."
+            echo "Create it (a repo named homebrew-tap) and give the token contents:write to enable this step."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        if: steps.tap.outputs.available == 'true'
+        uses: actions/checkout@v6
+
+      - name: Download release checksums
+        if: steps.tap.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" \
-              dist/*.tar.gz \
-              dist/*.zip \
-              dist/SHA256SUMS.txt \
-              --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" \
-              dist/*.tar.gz \
-              dist/*.zip \
-              dist/SHA256SUMS.txt \
-              --verify-tag \
-              --generate-notes \
-              --title "${GITHUB_REF_NAME}"
+          mkdir -p release-artifacts
+          gh release download "${GITHUB_REF_NAME}" --pattern SHA256SUMS.txt --dir release-artifacts --clobber
+
+      - name: Render formula
+        if: steps.tap.outputs.available == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SUMS_FILE: release-artifacts/SHA256SUMS.txt
+          OUTPUT: Formula/just-talk.rb
+        run: ./scripts/update-homebrew-formula.sh
+
+      - name: Push formula to tap
+        if: steps.tap.outputs.available == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" tap
+          mkdir -p tap/Formula
+          cp Formula/just-talk.rb tap/Formula/just-talk.rb
+          cd tap
+          if [ -z "$(git status --porcelain Formula/just-talk.rb)" ]; then
+            echo "Formula already up to date."
+            exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/just-talk.rb
+          git commit -m "just-talk ${GITHUB_REF_NAME}"
+          git push

@@ -26,9 +26,13 @@ func newBackend(cfg config.OverlayConfig) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
+	position := cfg.Position
+	if position == "" {
+		position = config.DefaultOverlayPosition()
+	}
 	cmd := exec.Command(exe,
 		"--overlay-helper",
-		"--overlay-position", cfg.Position,
+		"--overlay-position", position,
 		"--overlay-scale", strconv.FormatFloat(cfg.Scale, 'f', -1, 64),
 	)
 	cmd.Stdout = io.Discard
@@ -46,12 +50,18 @@ func newBackend(cfg config.OverlayConfig) (backend, error) {
 		return nil, fmt.Errorf("start macOS overlay helper: %w", err)
 	}
 	slog.Default().Info("macOS overlay helper started", "pid", cmd.Process.Pid)
+	if err := writeHelperCommand(stdin, helperCommand{Cmd: "config", ShowText: cfg.ShowText}); err != nil {
+		slog.Default().Debug("macOS overlay config failed", "error", err)
+	}
 	return &darwinBackend{cmd: cmd, stdin: stdin}, nil
 }
 
-func (b *darwinBackend) Show(label string, color statusColor) error {
-	slog.Default().Debug("macOS overlay show", "label", label, "r", color.R, "g", color.G, "b", color.B)
-	return b.send(helperCommand{Cmd: "show", Label: label, R: color.R, G: color.G, B: color.B})
+func (b *darwinBackend) Show(f frame) error {
+	slog.Default().Debug("macOS overlay show", "state", f.State, "level", f.Level, "text_len", len(f.Text), "detail", f.Detail)
+	return b.send(helperCommand{
+		Cmd: "show", Label: f.Label, R: f.Color.R, G: f.Color.G, B: f.Color.B,
+		State: f.State, Text: f.Text, Level: f.Level, Detail: f.Detail,
+	})
 }
 
 func (b *darwinBackend) Hide() error {

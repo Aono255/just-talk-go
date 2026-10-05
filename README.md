@@ -1,42 +1,70 @@
+<p align="center">
+  <img src="docs/assets/brand/icon-d.svg" alt="Just Talk" width="96">
+</p>
+
 # Just Talk
 
-[English](README.en.md) · [项目主页](https://whoamihappyhacking.github.io/just-talk-go/)
+[中文](README.md) · [English](README.en.md)
+
+[![Release](https://img.shields.io/github/v/release/wakaka6/just-talk-go?label=release)](https://github.com/wakaka6/just-talk-go/releases)
+[![Release workflow](https://github.com/wakaka6/just-talk-go/actions/workflows/release.yml/badge.svg)](https://github.com/wakaka6/just-talk-go/actions/workflows/release.yml)
+[![Go version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Homebrew](https://img.shields.io/badge/Homebrew-wakaka6%2Ftap-FBB040?logo=homebrew&logoColor=white)](https://github.com/wakaka6/homebrew-tap)
 
 减少用键盘的次数，改用口喷吧。
 
-Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快捷键录音，把语音识别结果复制到剪贴板，或直接上屏到当前输入框，适合写代码、聊天、记笔记和处理长文本输入。
-
-在 TUI 中修改 App Key 或 Access Key 后，退出编辑模式并按 `s` 保存；下一次录音会使用新凭证，无需重启。正在识别的录音继续使用建立连接时的凭证。
-
-## 截图
+Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快捷键录音，把语音流式发送到豆包大模型 ASR，识别结果自动复制到剪贴板，或直接上屏到当前输入框——适合写代码、聊天、记笔记和处理长文本输入。
 
 ![Just Talk TUI](docs/screenshot-tui.png)
 
 ## 功能
 
-- 全局快捷键录音，支持 `toggle` 和 `hold` 两种模式。
-- 语音热键限定为适合作为全局快捷键的按键：支持纯修饰键、功能键、Tab、CapsLock、方向键和导航键等；不支持字母、数字、标点、空格等普通字符键。
-- 豆包大模型流式 ASR，支持双向流优化版和二遍识别。
-- 自动复制到剪贴板，支持自动上屏。
-- Wayland / X11 / macOS / Windows 顶层录音状态胶囊提示。
-- TUI 配置界面，支持热键、模式、自动上屏、停止延迟、热词等配置。
-- 热词增强识别，适合项目名、人名、英文术语和专有名词。
-- 录音历史统计，包括历史次数、总字数、平均速度和最近速度。
+- 全局快捷键录音，支持 `toggle`（按一下开始、再按一下停止）和 `hold`（按住说话）两种模式。
+- 语音热键限定为适合作为全局快捷键的按键：纯修饰键组合、功能键、Tab、CapsLock、方向键和导航键等；不支持字母、数字、标点、空格等普通文本键。
+- 豆包大模型流式 ASR（双向流优化版 + 二遍识别），支持热词增强。
+- 识别结果自动复制到剪贴板，可选自动上屏到焦点输入框。
+- 录音状态浮层：macOS 默认从刘海展开，显示实时识别文字、麦克风音量和完成结果；Linux（Wayland / X11）和 Windows 使用置顶状态胶囊。
+- TUI 配置界面：热键、模式、自动上屏、停止延迟、热词、提示位置等，保存后即时生效，无需重启。
+- 录音历史统计：累计次数、总字数、平均速度和最近速度。
+- 录音中 `Esc` 取消，可重试错误时 `R` 重试。
 
-## 平台状态
-
-当前支持 Linux、macOS 和 Windows 桌面：
+## 平台支持
 
 | 平台 | 状态 | 说明 |
 | --- | --- | --- |
-| Linux Wayland | 已支持 | 已支持 Sway / wlroots 场景；快捷键基于 evdev，需要 input 权限 |
-| Linux X11 | 已支持 | 使用 X11 原生全局热键 |
-| macOS | 已支持 | 全局快捷键基于 CGEventTap，录音使用 CoreAudio，剪贴板使用 NSPasteboard，胶囊显示使用 AppKit NSPanel |
-| Windows 10/11 | 已支持 | 全局按键轮询及低级键盘钩子边沿回退、WinMM 录音、Unicode 剪贴板、SendInput 自动上屏和 Win32 状态胶囊 |
+| Linux Wayland | 已支持 | 已验证 Sway / wlroots；快捷键基于 evdev，需要 `input` 组权限；剪贴板/上屏依赖 `wl-clipboard` + `wtype` 或 `/dev/uinput` |
+| Linux X11 | 已支持 | 原生 X11 全局热键与浮层，XTest 自动上屏 |
+| macOS | 已支持 | CGEventTap 热键、CoreAudio 录音、NSPasteboard 剪贴板、AppKit NSPanel 浮层；需要辅助功能和麦克风权限 |
+| Windows 10/11 | 已支持 | 全局按键轮询 + 低级键盘钩子边沿回退、WinMM 录音、Unicode 剪贴板、SendInput 上屏、Win32 置顶浮层 |
 
-## 构建
+## 安装
 
-Just Talk 依赖平台原生能力。Linux 和 macOS 构建需要启用 cgo；Windows 使用纯 Go 的 Win32 调用，不需要 cgo。
+### Homebrew（macOS / Linux）
+
+```bash
+brew install wakaka6/tap/just-talk
+```
+
+来源：[wakaka6/homebrew-tap](https://github.com/wakaka6/homebrew-tap)。Formula 覆盖 macOS（Apple Silicon / Intel）和 Linux（amd64 / arm64）。
+
+### 预编译二进制
+
+<details>
+<summary>展开查看各平台归档下载与校验说明</summary>
+
+从 [GitHub Releases](https://github.com/wakaka6/just-talk-go/releases) 下载对应平台的归档，解压后将 `just-talk` 放入 `PATH`（如 `~/.local/bin`）。Windows 提供 `.zip`，其他平台为 `.tar.gz`，可用归档中的 `SHA256SUMS.txt` 校验。
+
+当前提供：Linux amd64 / arm64、macOS Intel / Apple Silicon、Windows amd64 / arm64。
+
+</details>
+
+### 源码构建
+
+<details>
+<summary>展开查看构建依赖与安装步骤</summary>
+
+Just Talk 依赖平台原生能力：Linux 和 macOS 需要启用 cgo；Windows 使用纯 Go 调用 Win32，不需要 cgo。
 
 Linux 构建依赖：
 
@@ -48,97 +76,101 @@ sudo pacman -S --needed go gcc libx11 libxtst libxext wayland
 sudo apt install golang-go build-essential libx11-dev libxtst-dev libxext-dev libxinerama-dev libwayland-dev
 ```
 
-macOS 构建依赖：
+macOS 构建依赖 Apple Command Line Tools（提供 clang 和 macOS SDK，不需要完整 Xcode）：
 
 ```bash
-# 需要 Apple Command Line Tools 提供 clang 和 macOS SDK；不需要安装完整 Xcode。
 xcode-select --install
 ```
 
-Windows 构建依赖：
+Windows 只需要 Go 1.25 或更高版本，不需要 ffmpeg、SoX 或 C 编译器：
 
 ```powershell
-# 安装 Go 1.25 或更高版本；不需要额外安装 ffmpeg、SoX 或 C 编译器。
 winget install --id GoLang.Go --exact
 ```
 
-构建当前平台二进制：
+构建：
 
 ```bash
-cd just-talk-go
 CGO_ENABLED=1 go build -o build/just-talk ./cmd/just-talk
+# Windows PowerShell：
+# go build -o build\just-talk.exe .\cmd\just-talk
 ```
 
-Windows PowerShell：
-
-```powershell
-cd just-talk-go
-go build -o build\just-talk.exe .\cmd\just-talk
-```
-
-安装到 `~/.local/bin/just-talk`：
+安装到用户目录（Linux/macOS 为 `~/.local/bin`，Windows 为 `%LOCALAPPDATA%\Programs\Just Talk`）：
 
 ```bash
-# 确保 ~/.local/bin 在 PATH 中（如未配置，将下面这行加入 ~/.bashrc 或 ~/.zshrc）
-# export PATH="$HOME/.local/bin:$PATH"
 build/just-talk --install
 # 或
 make install
 ```
 
-macOS 需要在本机 macOS 上构建；项目不提供非 cgo 版本。
+如提示安装目录不在 `PATH` 中，按命令输出的说明添加即可。
 
-Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`：
+</details>
 
-```powershell
-.\build\just-talk.exe --install
-# 如果安装目录尚未在 PATH 中，按命令输出提示添加即可。
-```
+## 快速开始
 
-## Release 下载
+1. 获取豆包大模型语音识别凭证（App Key / Access Key）。
+2. 运行 `just-talk --doctor` 检查麦克风、剪贴板工具和权限。
+3. 运行 `just-talk` 打开 TUI，在 App Key、Access Key 字段填入凭证，按 `s` 保存。
+4. 按 `push_to_talk` 热键（默认 `Alt+Super`；macOS 为 `Option+Command`）开始/停止录音。识别结果会复制到剪贴板，并在开启 `auto_submit` 时上屏到当前输入框。
 
-GitHub Release 提供以下预编译归档：
+### 权限
 
-- Linux amd64 / arm64
-- macOS Intel / Apple Silicon
-- Windows amd64 / arm64
-- `SHA256SUMS.txt` 文件校验
+<details>
+<summary>展开查看各平台权限要求</summary>
 
-发布流程使用 GoReleaser v2 和官方 `goreleaser/goreleaser-action`。Linux、macOS 和 Windows 二进制分别在对应的 GitHub 托管 runner 上原生构建；维护者推送 `v*` 标签时会自动构建并发布，例如：
+- **Linux Wayland**：全局热键通过 evdev 读取 `/dev/input/event*`，需要把当前用户加入 `input` 组后重新登录：
 
-```bash
-git tag v0.7.0
-git push origin v0.7.0
-```
+  ```bash
+  sudo usermod -aG input $USER
+  ```
 
-## 使用
+  剪贴板需要 `wl-clipboard`；自动上屏需要 `wtype`，或授予 `/dev/uinput` 写权限（KDE Plasma 推荐 uinput，`--doctor` 会打印完整配置步骤）。
 
-默认启动 TUI：
+- **macOS**：在“系统设置 → 隐私与安全性”中为启动 Just Talk 的终端应用（Terminal、iTerm2 等）授予 **辅助功能** 和 **麦克风** 权限。不需要 `.app` 签名或完整 Xcode。
+- **Windows**：无需管理员权限。若麦克风不可用，在“设置 → 隐私和安全性 → 麦克风”中允许桌面应用访问麦克风。
 
-```bash
-just-talk
-```
+</details>
 
-后台模式：
+## 快捷键
 
-```bash
-just-talk --no-tui
-```
+### 语音热键
 
-指定后端：
+| 按键 | 行为 |
+| --- | --- |
+| 配置的 `push_to_talk` | `toggle` 模式下开始/停止录音；`hold` 模式下按住说话 |
+| `Esc` | 取消当前录音或错误提示 |
+| `R` | 出现可重试错误时重新识别 |
 
-```bash
-just-talk --backend wayland
-just-talk --backend x11
-```
+语音热键只支持适合作为全局快捷键的按键：
 
-Windows 不需要指定后端。首次使用前可检查麦克风和配置：
+- 纯修饰键组合：`Alt+Super`、`Ctrl+Alt+Shift`、`Option+Command` 等。
+- `Fn`（macOS / Linux）：可写作 `Function`，可与普通键组合，但不能与 `F1`–`F24` 组合。Linux 上 `Fn` 通过 evdev 读取；配置了 `Fn` 的热键在未指定后端时自动选择 Wayland/evdev 后端。
+- 功能键 `F1`–`F24`，如 `F9`、`Alt+F8`。
+- 非文本控制键和导航键：`Tab`、`Enter`、`Escape`、`Backspace`、`CapsLock`、方向键、`Home`、`End`、`PageUp`、`PageDown`、`Insert`、`Delete`。
+- 不支持：`Fn+F1`–`Fn+F24`，以及不带 `Fn` 的字母、数字、标点、`Space`、小键盘键等会输入文本的按键（如 `Alt+G`、`G`、`Alt+1`、`Alt+Space`）。
 
-```powershell
-.\build\just-talk.exe --doctor
-```
+Windows 上低级键盘钩子只观察按键边沿，不消费、不回放修饰键，因此单独的 `Alt`、`Super` 和 `Alt+Tab` 等系统快捷键保持原有行为。
+
+### TUI 快捷键
+
+| 按键 | 行为 |
+| --- | --- |
+| `j` / `k` / 方向键 | 移动选中项 |
+| `e` / `i` / `Enter` | 编辑选中项（字符串字段进入输入；选项字段用 `j`/`k` 切换；布尔字段用 `Space` 切换） |
+| `Enter` | 退出编辑并保存；`Esc` 仅退出编辑 |
+| `s` | 保存全部配置（即时生效，无需重启） |
+| `l` | 展开/收起日志区域 |
+| `h` | 帮助开关 |
+| `q` / `Ctrl+C` | 退出 |
+
+在 TUI 中修改 App Key 或 Access Key 后按 `s` 保存，下一次录音即使用新凭证；正在进行的识别仍使用建立连接时的凭证。
 
 ## 配置
+
+<details>
+<summary>展开查看配置文件路径、推荐配置与 macOS 刘海浮层行为</summary>
 
 默认配置路径：
 
@@ -150,42 +182,123 @@ Windows 不需要指定后端。首次使用前可检查麦克风和配置：
 %APPDATA%\just-talk\config.toml
 ```
 
-推荐热键配置：
+同时会优先读取当前目录下的 `./config.toml` 和 `$XDG_CONFIG_HOME/just-talk/config.toml`。
+
+推荐配置：
 
 ```toml
 [voice]
-mode = "toggle"
+enabled = true
+mode = "toggle"                    # toggle | hold
 push_to_talk = "Alt+Super"
-```
-
-`Alt+Super` 配合 `toggle` 模式是推荐用法。按一次开始录音，再按一次停止录音，避免按住模式下和桌面环境或输入框发生按键冲突。在 Windows 上，低级键盘钩子只观察按键边沿，不会消费或回放修饰键，因此单独使用 `Alt`、`Super` 或 `Alt+Tab` 时会保持系统原有行为。组合键必须精确匹配配置的修饰键集合；钩子回退状态会通过未拦截的物理按键状态校验，避免把两次独立的单键按下拼成组合键。
-
-语音热键只支持适合作为全局快捷键的按键：
-
-- 支持：纯修饰键组合，如 `Alt+Super`、`Ctrl+Alt+Shift`。
-- 支持：macOS 和 Linux 上的 `Fn` 修饰键；也可以使用 `Function` 作为别名。`Fn` 可以和字母等普通按键组合，但不能和 `F1` 到 `F24` 等功能键组合。
-- Linux 使用 evdev 读取 `Fn`；未显式指定后端时，配置了 `Fn` 的热键会自动使用 evdev 后端。若手动指定 `--backend x11`，请改用 `--backend wayland`。
-- 支持：功能键 `F1` 到 `F24`，如 `F9`、`Alt+F8`。
-- 支持：非文本控制键和导航键，如 `Tab`、`Enter`、`Escape`、`Backspace`、`CapsLock`、`Up`、`Down`、`Left`、`Right`、`Home`、`End`、`PageUp`、`PageDown`、`Insert`、`Delete`。
-- 不支持：`Fn+F1` 到 `Fn+F24` 等功能键组合，以及不带 `Fn` 的字母、数字、标点、空格、数字小键盘数字和符号等会输入文本的按键，如 `Alt+G`、`G`、`Alt+1`、`Alt+Space`。
-
-热词示例：
-
-```toml
-[voice]
+language = "zh-CN"
+auto_submit = true                 # 识别完成后自动上屏
+stop_delay_ms = 0                  # hold 模式松开后的停止延迟
+device = ""                        # 录音设备（留空使用默认）
+gain = 0                           # 麦克风增益
+app_key = "your-app-key"
+access_key = "your-access-key"
+resource_id = "volc.bigasr.sauc.duration"
 hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+
+[overlay]
+enabled = true
+# macOS 默认 "notch"，其他平台默认 "bottom-center"
+# 可选：notch、top-left、top-center、top-right、bottom-left、bottom-center、bottom-right
+position = "notch"
+show_text = true                   # 刘海中是否显示实时/最终识别文字
+idle_visible = false               # 空闲时是否显示提示
+scale = 1.0
+
+[debug]
+enabled = false
+hotkeys = []                       # 调试插件额外注册的热键
 ```
 
-macOS 热键写法：
+### macOS 刘海浮层
 
-```toml
-[voice]
-# Option 等价于 Alt，Command/Cmd 等价于 Super
-push_to_talk = "Option+Command"
+以下为 macOS 实机刘海浮层预览（仅浮层区域，不含桌面内容）：
+
+![macOS 实机刘海浮层：录音中的实时识别文字、计时与麦克风音量](docs/assets/notch-live.gif)
+
+![macOS 实机刘海浮层：识别完成后的已复制状态](docs/assets/notch-live-final.png)
+
+- `position = "notch"` 时，提示从刘海处展开
+- 刘海文字由识别结果驱动刷新：收到新的中间结果立即更新，整段以约 100ms 淡入替换，不逐字打字。这只减少浮层的显示等待，不影响 ASR 返回速度。
+- 屏幕选择：每次录音首次显示时选择鼠标所在屏幕并在本轮录音期间固定；屏幕断开则按鼠标位置重选，找不到时回退到主屏幕。选中的屏幕没有刘海（外接显示器或无刘海 Mac）时，在该屏顶部居中显示状态胶囊，不显示文字。
+- 在 TUI 中修改：选中“提示位置”，按 `e` 进入编辑，`j`/`k` 切换，`Enter` 保存，立即生效。
+- `[overlay]` 配置保存后立即生效：`enabled` 即时开关，`show_text`/`idle_visible` 下一次刷新生效，`position`/`scale` 会重建浮层窗口。
+- 已有配置文件里显式写了 `position` 的不会被迁移；要启用刘海样式请在 TUI 或配置中改为 `"notch"`。Linux / Windows 上 `"notch"` 按 `top-center` 处理，其余位置与原状态胶囊一致，不显示文字。
+
+</details>
+
+## 命令行
+
+<details>
+<summary>展开查看 CLI 参数</summary>
+
+```text
+just-talk [flags]
+
+-tui                 启用 TUI（默认）
+-no-tui              后台模式，日志输出到 stderr
+-backend <name>      强制后端：x11 | wayland | darwin（也可设 JUST_TALK_BACKEND）
+-config <path>       指定配置文件路径
+-doctor              运行启动环境检查后退出
+-install             为当前用户安装可执行文件
+-debug               启用调试插件（配合配置 [debug]）
+-verbose             详细日志
 ```
 
-Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不可用，请在“Windows 设置 → 隐私和安全性 → 麦克风”中允许桌面应用访问麦克风。
+</details>
 
+## 开发
+
+<details>
+<summary>展开查看构建、测试与调试命令</summary>
+
+```bash
+make build          # 构建当前平台
+make run            # 直接运行
+go test ./...       # 运行全部测试
+go test ./... -tags no_x11    # 无 X11 环境下测试
+goreleaser check    # 校验 .goreleaser.yaml
+```
+
+可选的 Windows 集成测试（需要真实设备/钩子环境）：
+
+```bash
+JUST_TALK_TEST_WINDOWS_AUDIO=1 go test ./plugins/voice -run TestWindowsRecorderIntegration -v
+JUST_TALK_TEST_WINDOWS_HOTKEY=1 go test ./hotkey -run TestWindowsHookIntegration -v
+```
+
+TUI 模式下普通日志只写入日志文件与界面内的日志区域，避免破坏 Bubble Tea 布局；调试详情仅在 `--debug` 时可见。
+
+</details>
+
+## 发布流程
+
+<details>
+<summary>展开查看发布流程与 Homebrew 自动更新</summary>
+
+发布由 `.goreleaser.yaml` 和 `.github/workflows/release.yml` 驱动，使用 GoReleaser v2 与官方 `goreleaser/goreleaser-action`。推送 `v*` 标签后，Linux、macOS、Windows 二进制在对应的 GitHub 托管 runner 上原生构建（Linux/macOS 为 cgo 构建），归档上传后由发布任务合并并附加 `SHA256SUMS.txt` 到 GitHub Release：
+
+```bash
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+### Homebrew 自动更新（可选）
+
+GitHub Release 的构建与发布不依赖 Homebrew tap，两者相互独立。要让发布流程同时把 Formula（覆盖 macOS 与 Linux，arm64/amd64）更新到 [wakaka6/homebrew-tap](https://github.com/wakaka6/homebrew-tap)，需要以下仓库配置：
+
+1. 创建（或复用）tap 仓库 `wakaka6/homebrew-tap`，内含 `Formula/` 目录。
+2. 在 `wakaka6/just-talk-go` 的 Settings → Secrets and variables → Actions 中创建 secret `HOMEBREW_TAP_TOKEN`：一个对 tap 仓库拥有 `contents: write` 权限的 token（细粒度 PAT 即可，授权范围只需该仓库）。
+3. 可选：创建 repository variable `HOMEBREW_TAP_REPOSITORY`，值为 `<owner>/<repo>`；省略时默认为 `wakaka6/homebrew-tap`。
+
+未配置 `HOMEBREW_TAP_TOKEN` 时，workflow 会跳过 Homebrew 更新并输出警告，GitHub Release 仍正常发布。
+
+</details>
 
 ## 更新日志
 
@@ -193,20 +306,10 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 
 ## 维护与贡献
 
-Just Talk 由 `whoamihappyhacking` 维护。
+本仓库是 [whoamihappyhacking/just-talk-go](https://github.com/whoamihappyhacking/just-talk-go) 的独立 fork。上游项目仍由原作者维护；本仓库独立演进，目标是社区驱动的开发，欢迎所有贡献者参与。
 
-本项目不接受 Pull Request。欢迎通过 Issue 反馈 bug、使用体验和功能建议。
+欢迎通过 [Issue](https://github.com/wakaka6/just-talk-go/issues) 反馈 bug、使用体验和功能建议；也欢迎 Pull Request。贡献流程与要求见 [CONTRIBUTING.md](CONTRIBUTING.md)：建议先开 Issue 讨论改动方向，提交前运行 `gofmt`、`go vet` 和 `go test ./...`。
 
 ## 许可证
 
-Just Talk 使用 GNU General Public License v3.0 开源。
-
-## 项目介绍网页
-
-在线访问：[Just Talk 项目介绍页](https://whoamihappyhacking.github.io/just-talk-go/)。推送 `website/` 更新到 `master` 后，GitHub Actions 会自动部署到 GitHub Pages。
-
-静态介绍页位于 `website/`，包含功能、平台支持、快速开始与不调用麦克风的交互演示。启动预览：
-
-```bash
-python3 -m http.server 7788 --bind 0.0.0.0 --directory website
-```
+Just Talk 使用 [GNU General Public License v3.0](LICENSE)（GPL-3.0-only）开源。

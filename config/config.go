@@ -26,6 +26,7 @@ type OverlayConfig struct {
 	Enabled     bool    `toml:"enabled"`
 	Position    string  `toml:"position"`
 	IdleVisible bool    `toml:"idle_visible"`
+	ShowText    bool    `toml:"show_text"`
 	Scale       float64 `toml:"scale"`
 }
 
@@ -51,9 +52,18 @@ func Default() *Config {
 			Language: "zh-CN", AutoSubmit: true, ResourceID: "volc.bigasr.sauc.duration",
 		},
 		Overlay: OverlayConfig{
-			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
+			Enabled: true, Position: DefaultOverlayPosition(), IdleVisible: false, ShowText: true, Scale: 1.0,
 		},
 	}
+}
+
+// DefaultOverlayPosition anchors the macOS overlay to the notch; other
+// platforms keep the bottom-center capsule.
+func DefaultOverlayPosition() string {
+	if runtime.GOOS == "darwin" {
+		return "notch"
+	}
+	return "bottom-center"
 }
 
 func Load(path string) (*Config, error) {

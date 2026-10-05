@@ -213,10 +213,10 @@ func newBackend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *windowsOverlayBackend) Show(label string, color statusColor) error {
+func (b *windowsOverlayBackend) Show(f frame) error {
 	b.mu.Lock()
-	b.label = label
-	b.color = color
+	b.label = f.Label
+	b.color = f.Color
 	hwnd := b.hwnd
 	closed := b.closed
 	b.mu.Unlock()
@@ -371,7 +371,7 @@ func (b *windowsOverlayBackend) positionWindow(hwnd uintptr) {
 	switch strings.ToLower(strings.TrimSpace(b.position)) {
 	case "top-left":
 		x = work.Left + margin
-	case "top-center":
+	case "top-center", "notch":
 		x = work.Left + (work.Right-work.Left-b.width)/2
 	case "bottom-left":
 		x = work.Left + margin

@@ -203,12 +203,12 @@ func newX11Backend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *x11Backend) Show(label string, color statusColor) error {
+func (b *x11Backend) Show(f frame) error {
 	if b.dpy == nil {
 		return nil
 	}
 	b.move()
-	b.draw(label, color)
+	b.draw(f.Label, f.Color)
 	if !b.visible {
 		C.XMapRaised(b.dpy, b.win)
 		b.visible = true
@@ -256,7 +256,7 @@ func (b *x11Backend) move() {
 	switch strings.ToLower(b.position) {
 	case "top-left":
 		x, y = monX+b.margin, monY+b.margin
-	case "top-center":
+	case "top-center", "notch":
 		x, y = monX+(monW-b.w)/2, monY+b.margin
 	case "bottom-left":
 		x, y = monX+b.margin, monY+monH-b.h-b.margin

@@ -555,6 +555,8 @@ func (p *VoicePlugin) startRecording() {
 	sessionID := p.sessionID
 	sessionGen := p.sessionGen
 	startedAt := time.Now()
+	resetOverlaySession(sessionID)
+	activeRecorder.Store(rec)
 	p.recorder, p.recording, p.userStopped = rec, true, false
 	p.startedAt = startedAt
 	p.stopping = false
@@ -580,6 +582,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		currentSession := p.sessionGen == sessionGen
 		if currentSession {
 			rec.Stop()
+			activeRecorder.CompareAndSwap(rec, nil)
 			p.stopping, p.recorder, p.recording = false, nil, false
 			p.stopAt = time.Time{}
 			p.asrCancel = nil
@@ -620,6 +623,9 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 			if result.Error != nil {
 				pout("❌ ASR 错误: %v", result.Error)
 				continue
+			}
+			if result.Text != "" {
+				setOverlayPartial(sessionID, result.Text)
 			}
 			if result.IsFinal {
 				pout("\n🎤 最终: %s", result.Text)
@@ -722,6 +728,7 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		startedAt:   p.startedAt,
 	}
 	p.sessionGen++
+	activeRecorder.CompareAndSwap(p.recorder, nil)
 	p.recorder, p.asrClient, p.asrCancel, p.audioDone = nil, nil, nil, nil
 	p.startedAt = time.Time{}
 	p.recording, p.stopping, p.userStopped = false, false, false
@@ -828,13 +835,17 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 }
 
 func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
+	beginOverlayOutput()
 	go func() {
+		detail := ""
+		defer func() { finishOverlayOutput(text, detail) }()
 		if autoSubmit {
 			if err := autotype.Paste(text, p.logger); err != nil {
 				pout("❌ 上屏失败: %v", err)
 			} else {
 				pout("📋 已复制到剪贴板")
 				pout("✅ 已上屏")
+				detail = "pasted"
 			}
 			return
 		}
@@ -844,6 +855,7 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 			pout("❌ 复制到剪贴板失败: %v", err)
 		} else {
 			pout("📋 已复制到剪贴板")
+			detail = "copied"
 		}
 	}()
 }
@@ -948,6 +960,7 @@ func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recordin
 		s.SessionID = sessionID
 		s.PendingFinishes = pendingDone
 	})
+	notifyOverlay()
 }
 
 func (p *VoicePlugin) clearErrorLocked() {

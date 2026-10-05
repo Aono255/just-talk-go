@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+  <title id="title">Just Talk macOS 刘海录音界面预览</title>
+  <desc id="desc">产品示意：黑色渐变背景上的 macOS 刘海录音状态，展示实时中文识别文字和音量波形。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111318"/>
+      <stop offset="0.52" stop-color="#090a0d"/>
+      <stop offset="1" stop-color="#17191f"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#252830"/>
+      <stop offset="1" stop-color="#17191f"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#55e6a5"/>
+      <stop offset="1" stop-color="#9bf4d0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#000" flood-opacity="0.52"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="600" rx="28" fill="url(#bg)"/>
+  <path d="M0 102C220 58 370 68 600 106s380 48 600-2V0H0Z" fill="#1b1e25" opacity=".5"/>
+  <text x="72" y="82" fill="#858b99" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="17" letter-spacing="2">JUST TALK · macOS 刘海界面预览</text>
+
+  <!-- Isolated black notch shape; no desktop or window chrome is shown. -->
+  <g filter="url(#shadow)">
+    <path d="M413 116h374v27c0 38-30 68-68 68H481c-38 0-68-30-68-68Z" fill="#020204"/>
+    <circle cx="441" cy="145" r="5" fill="#55e6a5"/>
+    <circle cx="759" cy="145" r="3.5" fill="#30343e"/>
+    <text x="462" y="151" fill="#f2f5f7" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="16" font-weight="600">正在录音</text>
+    <text x="749" y="151" text-anchor="end" fill="#727987" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="13">00:08</text>
+
+    <rect x="330" y="228" width="540" height="238" rx="32" fill="url(#panel)" stroke="#343944" stroke-width="1"/>
+    <text x="378" y="278" fill="#7f8795" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="15">实时识别</text>
+    <text x="378" y="335" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="30" font-weight="600">帮我把这段内容整理成</text>
+    <text x="378" y="378" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="30" font-weight="600">一份简洁的会议摘要</text>
+    <rect x="378" y="414" width="444" height="2" rx="1" fill="#3a414c"/>
+    <g fill="url(#wave)">
+      <rect x="378" y="431" width="4" height="14" rx="2"/>
+      <rect x="389" y="425" width="4" height="26" rx="2"/>
+      <rect x="400" y="420" width="4" height="36" rx="2"/>
+      <rect x="411" y="429" width="4" height="18" rx="2"/>
+      <rect x="422" y="416" width="4" height="44" rx="2"/>
+      <rect x="433" y="424" width="4" height="28" rx="2"/>
+      <rect x="444" y="431" width="4" height="14" rx="2"/>
+      <rect x="455" y="421" width="4" height="34" rx="2"/>
+      <rect x="466" y="427" width="4" height="22" rx="2"/>
+      <rect x="477" y="417" width="4" height="42" rx="2"/>
+      <rect x="488" y="425" width="4" height="26" rx="2"/>
+      <rect x="499" y="432" width="4" height="12" rx="2"/>
+      <rect x="510" y="419" width="4" height="38" rx="2"/>
+      <rect x="521" y="429" width="4" height="18" rx="2"/>
+      <rect x="532" y="423" width="4" height="30" rx="2"/>
+      <rect x="543" y="432" width="4" height="12" rx="2"/>
+      <rect x="554" y="418" width="4" height="40" rx="2"/>
+      <rect x="565" y="427" width="4" height="22" rx="2"/>
+      <rect x="576" y="421" width="4" height="34" rx="2"/>
+      <rect x="587" y="432" width="4" height="12" rx="2"/>
+      <rect x="598" y="416" width="4" height="44" rx="2"/>
+      <rect x="609" y="425" width="4" height="26" rx="2"/>
+      <rect x="620" y="430" width="4" height="16" rx="2"/>
+      <rect x="631" y="420" width="4" height="36" rx="2"/>
+      <rect x="642" y="428" width="4" height="20" rx="2"/>
+      <rect x="653" y="417" width="4" height="42" rx="2"/>
+      <rect x="664" y="427" width="4" height="22" rx="2"/>
+      <rect x="675" y="432" width="4" height="12" rx="2"/>
+      <rect x="686" y="422" width="4" height="32" rx="2"/>
+      <rect x="697" y="428" width="4" height="20" rx="2"/>
+      <rect x="708" y="416" width="4" height="44" rx="2"/>
+      <rect x="719" y="425" width="4" height="26" rx="2"/>
+      <rect x="730" y="430" width="4" height="16" rx="2"/>
+      <rect x="741" y="421" width="4" height="34" rx="2"/>
+      <rect x="752" y="427" width="4" height="22" rx="2"/>
+      <rect x="763" y="432" width="4" height="12" rx="2"/>
+      <rect x="774" y="423" width="4" height="30" rx="2"/>
+      <rect x="785" y="429" width="4" height="18" rx="2"/>
+      <rect x="796" y="418" width="4" height="40" rx="2"/>
+      <rect x="807" y="426" width="4" height="24" rx="2"/>
+    </g>
+  </g>
+  <text x="600" y="548" text-anchor="middle" fill="#666d7a" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif" font-size="14">产品示意 · 录音实时文字状态</text>
+</svg>
