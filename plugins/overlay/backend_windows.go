@@ -426,7 +426,7 @@ func (b *windowsOverlayBackend) render(hwnd uintptr) error {
 		procDeleteObject.Call(bitmap)
 	}()
 
-	destination := unsafe.Slice((*byte)(unsafe.Pointer(bits)), int(width*height*4))
+	destination := unsafe.Slice((*byte)(bits), int(width*height*4))
 	b.composeOverlay(screenDC, destination, label, color)
 
 	size := overlaySize{CX: width, CY: height}
@@ -441,7 +441,7 @@ func (b *windowsOverlayBackend) render(hwnd uintptr) error {
 	return nil
 }
 
-func createOverlayDIB(hdc uintptr, width, height int32) (uintptr, uintptr, error) {
+func createOverlayDIB(hdc uintptr, width, height int32) (uintptr, unsafe.Pointer, error) {
 	bmi := overlayBitmapInfo{Header: overlayBitmapInfoHeader{
 		Size:        uint32(unsafe.Sizeof(overlayBitmapInfoHeader{})),
 		Width:       width,
@@ -450,13 +450,13 @@ func createOverlayDIB(hdc uintptr, width, height int32) (uintptr, uintptr, error
 		BitCount:    32,
 		Compression: biRGB,
 	}}
-	var bits uintptr
+	var bits unsafe.Pointer
 	bitmap, _, err := procCreateDIBSection.Call(
 		hdc, uintptr(unsafe.Pointer(&bmi)), dibRGBColors,
 		uintptr(unsafe.Pointer(&bits)), 0, 0,
 	)
-	if bitmap == 0 || bits == 0 {
-		return 0, 0, fmt.Errorf("create Windows overlay bitmap: %w", err)
+	if bitmap == 0 || bits == nil {
+		return 0, nil, fmt.Errorf("create Windows overlay bitmap: %w", err)
 	}
 	return bitmap, bits, nil
 }
@@ -565,7 +565,7 @@ func (b *windowsOverlayBackend) drawOverlayText(screenDC uintptr, pixels []byte,
 		procSelectObject.Call(textDC, oldBitmap)
 		procDeleteObject.Call(bitmap)
 	}()
-	mask := unsafe.Slice((*byte)(unsafe.Pointer(bits)), int(textWidth*textHeight*4))
+	mask := unsafe.Slice((*byte)(bits), int(textWidth*textHeight*4))
 	clear(mask)
 
 	fontName, _ := windows.UTF16PtrFromString("Segoe UI Semibold")

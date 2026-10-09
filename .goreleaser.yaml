@@ -42,6 +42,8 @@ builds:
       - amd64
     env:
       - CGO_ENABLED={{ .Env.CGO_ENABLED }}
+      - CGO_CFLAGS=-O2 -g -mmacosx-version-min=15.0
+      - CGO_LDFLAGS=-mmacosx-version-min=15.0
     flags:
       - -trimpath
     ldflags: *release_ldflags
@@ -56,6 +58,8 @@ builds:
       - arm64
     env:
       - CGO_ENABLED={{ .Env.CGO_ENABLED }}
+      - CGO_CFLAGS=-O2 -g -mmacosx-version-min=15.0
+      - CGO_LDFLAGS=-mmacosx-version-min=15.0
     flags:
       - -trimpath
     ldflags: *release_ldflags

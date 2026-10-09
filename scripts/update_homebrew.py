@@ -25,7 +25,7 @@ class JustTalk < Formula
   version "{tag[1:]}"
   license "GPL-3.0-only"
 
-  depends_on :macos
+  depends_on macos: :sequoia
 
   on_arm do
     url "https://github.com/Aono255/just-talk-go/releases/download/{tag}/just-talk_darwin_arm64.tar.gz"

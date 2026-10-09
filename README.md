@@ -38,7 +38,7 @@ Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快�
 
 ## macOS：Homebrew 安装与更新
 
-首次安装（Apple Silicon 和 Intel 均提供预编译版本）：
+首次安装（macOS 15 或更高版本，Apple Silicon 和 Intel 均提供预编译版本）：
 
 ```bash
 brew tap Aono255/just-talk https://github.com/Aono255/just-talk-go
@@ -132,8 +132,8 @@ Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`：
 发布流程使用 GoReleaser v2 和官方 `goreleaser/goreleaser-action`。Linux、macOS 和 Windows 二进制分别在对应的 GitHub 托管 runner 上原生构建；维护者推送 `v*` 标签时会自动构建并发布，例如：
 
 ```bash
-git tag v0.1.2
-git push origin master v0.1.2
+git tag v0.1.3
+git push origin master v0.1.3
 ```
 
 使用稳定版本标签 `v主版本.次版本.修订版本`。所有平台构建和测试成功后，工作流发布归档与校验值，再自动提交本仓库的 `Formula/just-talk.rb`。它只使用 GitHub 内置令牌，不需要额外 PAT。Formula 当前提供 macOS 安装；Linux 和 Windows 使用 Release 归档或自行构建。

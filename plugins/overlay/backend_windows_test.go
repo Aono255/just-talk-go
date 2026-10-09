@@ -8,9 +8,25 @@ import (
 	"os"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/c/just-talk-go/config"
 )
+
+// Verify that the native API returns writable bitmap memory through the typed
+// pointer boundary. This creates no window and does not capture the screen.
+func TestWindowsOverlayDIBMemory(t *testing.T) {
+	bitmap, bits, err := createOverlayDIB(0, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer procDeleteObject.Call(bitmap)
+	pixels := unsafe.Slice((*byte)(bits), 16)
+	pixels[0], pixels[15] = 0x11, 0x88
+	if pixels[0] != 0x11 || pixels[15] != 0x88 {
+		t.Fatal("native bitmap memory did not retain pixel writes")
+	}
+}
 
 func TestWindowsOverlayIntegration(t *testing.T) {
 	if os.Getenv("JUST_TALK_TEST_WINDOWS_OVERLAY") == "" {

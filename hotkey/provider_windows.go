@@ -565,9 +565,8 @@ func (p *windowsProvider) requestKeyboardHookStop() {
 	}
 }
 
-func windowsLowLevelHookProc(nCode int32, wParam, lParam uintptr) uintptr {
-	if nCode >= 0 && lParam != 0 {
-		event := (*windowsLowLevelKeyEvent)(unsafe.Pointer(lParam))
+func windowsLowLevelHookProc(nCode int32, wParam uintptr, event *windowsLowLevelKeyEvent) uintptr {
+	if nCode >= 0 && event != nil {
 		windowsHookProviderMu.RLock()
 		provider := windowsHookProvider
 		windowsHookProviderMu.RUnlock()
@@ -575,7 +574,7 @@ func windowsLowLevelHookProc(nCode int32, wParam, lParam uintptr) uintptr {
 			provider.recordHookEvent(*event)
 		}
 	}
-	result, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+	result, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, uintptr(unsafe.Pointer(event)))
 	return result
 }
 

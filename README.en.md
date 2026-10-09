@@ -38,7 +38,7 @@ Linux, macOS, and Windows desktops are supported:
 
 ## macOS: Homebrew Installation And Updates
 
-Prebuilt releases are available for Apple Silicon and Intel:
+Prebuilt releases are available for Apple Silicon and Intel on macOS 15 or later:
 
 ```bash
 brew tap Aono255/just-talk https://github.com/Aono255/just-talk-go
@@ -132,8 +132,8 @@ Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`:
 The release workflow uses GoReleaser v2 with the official `goreleaser/goreleaser-action`. Linux, macOS, and Windows binaries are built natively on matching GitHub-hosted runners. Maintainers can build and publish a release by pushing a `v*` tag, for example:
 
 ```bash
-git tag v0.1.2
-git push origin master v0.1.2
+git tag v0.1.3
+git push origin master v0.1.3
 ```
 
 Use stable `vMAJOR.MINOR.PATCH` tags. After all native builds and tests succeed, the workflow publishes archives and checksums, then commits the updated `Formula/just-talk.rb` to this repository using the built-in GitHub token. No extra PAT is required. The formula currently supports macOS; Linux and Windows users can use release archives or build from source.

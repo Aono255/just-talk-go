@@ -6,9 +6,38 @@ import (
 	"context"
 	"errors"
 	"os"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
+
+// Call the production C-ABI callback with a fixture payload. No keyboard hook
+// is installed and no physical keyboard input is required.
+func TestWindowsKeyboardCallbackABI(t *testing.T) {
+	p := newWindowsTestProvider(t)
+	p.pollKeyDown = func(KeyCode) bool { return false }
+	windowsHookProviderMu.Lock()
+	previous := windowsHookProvider
+	windowsHookProvider = p
+	windowsHookProviderMu.Unlock()
+	t.Cleanup(func() {
+		windowsHookProviderMu.Lock()
+		windowsHookProvider = previous
+		windowsHookProviderMu.Unlock()
+	})
+
+	event := windowsLowLevelKeyEvent{VirtualKey: vkLMenu}
+	syscall.SyscallN(windowsHookCallback, 0, 0, uintptr(unsafe.Pointer(&event)))
+	if !p.hookKeyDown(KeyAlt) {
+		t.Fatal("native callback did not receive the key-down payload")
+	}
+	event.Flags = llkhfUp
+	syscall.SyscallN(windowsHookCallback, 0, 0, uintptr(unsafe.Pointer(&event)))
+	if p.hookKeyDown(KeyAlt) {
+		t.Fatal("native callback did not receive the key-up payload")
+	}
+}
 
 func TestWindowsProviderAppliesGlobalKeyStateEdges(t *testing.T) {
 	p := newWindowsTestProvider(t)

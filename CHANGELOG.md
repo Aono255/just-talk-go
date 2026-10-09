@@ -2,16 +2,18 @@
 
 All notable project changes are tracked here.
 
-## v0.1.1 - 2026-10-09
+## v0.1.2 - 2026-10-09
 
 - 基于 `whoamihappyhacking/just-talk-go` 的 `master` 建立 Aono255 维护分支，独立发布版本。
 - macOS 收到热键监听超时禁用通知后自动恢复监听；禁用通知不再读取键盘事件字段，主动停止监听时不会被重新启用。
 - 增加不需要辅助功能权限的原生回调回归测试，覆盖超时恢复、用户主动禁用、停止后通知和正常按下/松开事件。
 - 添加 `--version`，发布包包含版本号和提交号，便于确认当前运行版本。
 - 添加 macOS Homebrew 配方生成和发布后自动更新，支持本 fork 的 `brew update` / `brew upgrade`。
+- macOS 预编译包明确以 macOS 15 为最低版本，Homebrew 配方同步声明系统要求。
+- Windows 键盘回调与位图内存使用明确的指针类型，保留原生 ABI，消除 `go vet` 的整数地址转换告警。
 - 热键恢复路径已通过回归测试；真实后台长时间使用效果仍需人工试用。
 
-## 上游 master（已包含在 v0.1.1）
+## 上游 master（已包含在 v0.1.2）
 
 - Fix TUI configuration reloads retaining old ASR credentials: after saving with `s`, the next recording uses the updated App Key and Access Key without restarting.
 - Add a responsive Chinese project introduction website with a simulated recording and R-triggered retry demo, platform-specific launch commands, static HTTP preview on port 7788, and automated GitHub Pages deployment linked from both READMEs.
