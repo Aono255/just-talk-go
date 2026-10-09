@@ -53,6 +53,8 @@ type TUIVoiceStatus struct {
 	UpdatedAt       time.Time
 	SessionID       uint64
 	PendingFinishes int
+	Transcript      string
+	TranscriptUntil time.Time
 	LastHotkeyAt    time.Time
 	LastHotkeyType  string
 	LastHandledAt   time.Time
@@ -249,6 +251,11 @@ type VoicePlugin struct {
 	events                 chan hotkey.Event
 	combo                  hotkey.Combo
 	mode                   string
+	starting               bool
+	startCanceled          bool
+	recorderStart          func(*Recorder) error // Native-start seam for blocked-device regression tests.
+	transcript             string
+	transcriptUntil        time.Time
 	recording              bool
 	stopping               bool
 	holdReleased           bool
@@ -311,6 +318,7 @@ func (p *VoicePlugin) Start(ctx context.Context) error {
 
 func (p *VoicePlugin) Stop() error {
 	p.mu.Lock()
+	p.startCanceled = true
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
 	p.publishStatusLocked()
@@ -432,7 +440,7 @@ func (p *VoicePlugin) eventLoop(ctx context.Context) {
 func (p *VoicePlugin) handleHotkey(evt hotkey.Event) {
 	markTUIHandled(evt)
 	p.mu.Lock()
-	mode, rec, stopping := p.mode, p.recording, p.stopping
+	mode, rec, stopping, starting := p.mode, p.recording, p.stopping, p.starting
 	p.mu.Unlock()
 	p.logger.Debug("voice hotkey handling", "type", evt.Type, "mode", mode, "recording", rec, "stopping", stopping)
 	switch mode {
@@ -451,7 +459,9 @@ func (p *VoicePlugin) handleHotkey(evt hotkey.Event) {
 		if evt.Type != hotkey.KeyDown {
 			return
 		}
-		if !rec {
+		if starting {
+			p.cancelRecording()
+		} else if !rec {
 			p.startRecording()
 		} else if p.stopping {
 			p.restartRecording()
@@ -471,8 +481,9 @@ func (p *VoicePlugin) startStopDelay() {
 	p.stopping, p.userStopped = true, true
 	delay := time.Duration(p.stopDelayMs) * time.Millisecond
 	p.stopAt = time.Now().Add(delay)
+	sessionGen := p.sessionGen
 	p.stopTimer = time.AfterFunc(delay, func() {
-		p.stopRecordingAsync()
+		p.stopRecordingAsync(sessionGen)
 	})
 	p.publishStatusLocked()
 	pout("🎤 即将停止... (%dms 缓冲)", p.stopDelayMs)
@@ -505,6 +516,9 @@ func (p *VoicePlugin) cancelStopDelayOnlyLocked() {
 func (p *VoicePlugin) clearHoldReleased() {
 	p.mu.Lock()
 	p.holdReleased = false
+	if p.starting {
+		p.publishStatusLocked()
+	}
 	p.mu.Unlock()
 }
 
@@ -512,6 +526,9 @@ func (p *VoicePlugin) markHoldReleased() {
 	p.mu.Lock()
 	p.holdReleased = true
 	shouldStop := p.recording && !p.stopping
+	if p.starting {
+		p.publishStatusLocked()
+	}
 	p.mu.Unlock()
 	if shouldStop {
 		p.startStopDelay()
@@ -521,9 +538,12 @@ func (p *VoicePlugin) markHoldReleased() {
 func (p *VoicePlugin) startRecording() {
 	p.mu.Lock()
 	p.cancelStopDelayOnlyLocked()
-	if p.recording || p.asrClient != nil {
+	if p.starting || p.recording || p.asrClient != nil {
 		p.mu.Unlock()
-		pout("⚠️  已经在录音中")
+		return
+	}
+	if !p.cfg.Voice.Enabled || p.env.Engine().Context().Err() != nil {
+		p.mu.Unlock()
 		return
 	}
 	vc := p.cfg.Voice
@@ -540,20 +560,56 @@ func (p *VoicePlugin) startRecording() {
 	} else {
 		rec = NewRecorder(p.logger, vc.Gain)
 	}
-	if err := rec.Start(); err != nil {
-		p.sessionID++
-		sessionID := p.sessionID
-		p.publishErrorLocked("录音启动失败: "+shortError(err), sessionID)
-		p.mu.Unlock()
-		pout("❌ 录音启动失败: %v", err)
-		return
-	}
-	pout("🎤 开始录音... (后端: %s)", rec.Backend())
-	ctx, cancel := context.WithCancel(context.Background())
 	p.sessionID++
 	p.sessionGen++
 	sessionID := p.sessionID
 	sessionGen := p.sessionGen
+	p.starting, p.startCanceled = true, false
+	p.transcript, p.transcriptUntil = "", time.Time{}
+	p.clearErrorLocked()
+	p.publishStatusLocked()
+	p.mu.Unlock()
+	pout("🎤 正在打开麦克风...")
+	p.logger.Debug("microphone start requested", "session_id", sessionID)
+	go p.openRecording(rec, asrCfg, sessionID, sessionGen)
+}
+
+func (p *VoicePlugin) openRecording(rec *Recorder, asrCfg ASRConfig, sessionID, sessionGen uint64) {
+	start := p.recorderStart
+	if start == nil {
+		start = (*Recorder).Start
+	}
+	err := start(rec)
+	p.mu.Lock()
+	abandoned := p.startCanceled || p.sessionGen != sessionGen || p.env.Engine().Context().Err() != nil || !p.cfg.Voice.Enabled
+	canceled := abandoned || (p.mode == "hold" && p.holdReleased)
+	if err != nil {
+		p.starting = false
+		if abandoned {
+			p.publishStatusLocked()
+		} else {
+			p.publishErrorLocked("录音启动失败: "+shortError(err), sessionID)
+		}
+		p.mu.Unlock()
+		if !abandoned {
+			pout("❌ 录音启动失败: %v", err)
+		}
+		return
+	}
+	if canceled {
+		// Keep the start slot occupied until the native queue is fully released.
+		p.mu.Unlock()
+		_, _ = rec.Stop()
+		p.mu.Lock()
+		p.starting = false
+		p.publishStatusLocked()
+		p.mu.Unlock()
+		pout("🎤 麦克风启动已取消")
+		return
+	}
+	p.starting = false
+	pout("🎤 开始录音... (后端: %s)", rec.Backend())
+	ctx, cancel := context.WithCancel(context.Background())
 	startedAt := time.Now()
 	p.recorder, p.recording, p.userStopped = rec, true, false
 	p.startedAt = startedAt
@@ -561,14 +617,10 @@ func (p *VoicePlugin) startRecording() {
 	p.stopAt = time.Time{}
 	p.clearErrorLocked()
 	p.asrCancel = cancel
-	shouldStopImmediately := p.mode == "hold" && p.holdReleased
 	p.publishStatusLocked()
-	p.mu.Unlock() // Release lock before slow WebSocket dial
+	p.mu.Unlock()
 
 	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, asrCfg)
-	if shouldStopImmediately {
-		p.startStopDelay()
-	}
 }
 
 func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, asrCfg ASRConfig) {
@@ -621,6 +673,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 				pout("❌ ASR 错误: %v", result.Error)
 				continue
 			}
+			p.updateTranscript(sessionID, result.Text)
 			if result.IsFinal {
 				pout("\n🎤 最终: %s", result.Text)
 			} else if result.Text != "" {
@@ -644,6 +697,11 @@ func (p *VoicePlugin) restartRecording() {
 
 func (p *VoicePlugin) cancelRecording() {
 	p.mu.Lock()
+	p.transcript, p.transcriptUntil = "", time.Time{}
+	hadStarting := p.starting
+	if hadStarting {
+		p.startCanceled = true
+	}
 	session := p.detachRecordingLocked()
 	hadError := p.lastError != "" && time.Now().Before(p.errorUntil)
 	hadPending := p.pendingDone > 0
@@ -671,6 +729,8 @@ func (p *VoicePlugin) cancelRecording() {
 			_ = session.asrClient.Close()
 		}
 		pout("🎤 已取消本次录音")
+	} else if hadStarting {
+		pout("🎤 已取消麦克风启动，等待设备返回")
 	} else if hadPending {
 		pout("🎤 已取消等待识别结果")
 	} else if hadError {
@@ -680,7 +740,7 @@ func (p *VoicePlugin) cancelRecording() {
 
 func (p *VoicePlugin) retryLastError() {
 	p.mu.Lock()
-	if p.recording || p.stopping || p.pendingDone > 0 || p.lastError == "" || time.Now().After(p.errorUntil) {
+	if p.starting || p.recording || p.stopping || p.pendingDone > 0 || p.lastError == "" || time.Now().After(p.errorUntil) {
 		p.mu.Unlock()
 		return
 	}
@@ -690,8 +750,12 @@ func (p *VoicePlugin) retryLastError() {
 	p.startRecording()
 }
 
-func (p *VoicePlugin) stopRecordingAsync() {
+func (p *VoicePlugin) stopRecordingAsync(sessionGen uint64) {
 	p.mu.Lock()
+	if p.sessionGen != sessionGen || !p.recording || !p.stopping {
+		p.mu.Unlock()
+		return
+	}
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
 	p.publishStatusLocked()
@@ -802,6 +866,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			}
 		}
 		if text := session.asrClient.LastText(); text != "" && session.userStopped && p.claimSessionOutput(session.sessionID) {
+			p.updateTranscript(session.sessionID, text)
 			audioDuration := time.Duration(0)
 			if !session.startedAt.IsZero() {
 				audioDuration = time.Since(session.startedAt)
@@ -856,6 +921,24 @@ func (p *VoicePlugin) recordingSessionFinished(sessionID uint64) {
 	if p.pendingDone > 0 {
 		p.pendingDone--
 	}
+	if sessionID == p.sessionID && !p.recording && !p.starting && p.transcript != "" {
+		p.transcriptUntil = time.Now().Add(3 * time.Second)
+	}
+	p.publishStatusLocked()
+}
+
+func (p *VoicePlugin) updateTranscript(sessionID uint64, text string) {
+	if text == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, finishing := p.finishingSessions[sessionID]
+	_, canceled := p.canceledSessions[sessionID]
+	if sessionID != p.sessionID || canceled || (!p.recording && !finishing) {
+		return
+	}
+	p.transcript = text
 	p.publishStatusLocked()
 }
 
@@ -888,6 +971,11 @@ func (p *VoicePlugin) publishStatusLocked() {
 	recording, stopping := p.recording, false
 
 	switch {
+	case p.starting:
+		state, detail = "connecting", "正在打开麦克风"
+		if p.startCanceled || (p.mode == "hold" && p.holdReleased) {
+			detail = "已取消，等待麦克风启动返回"
+		}
 	case p.recording && p.stopping:
 		state, detail = "stopping_delayed", "等待停止延迟"
 		stopping = true
@@ -911,7 +999,7 @@ func (p *VoicePlugin) publishStatusLocked() {
 		p.cleanupTransientHotkeysLocked()
 		return
 	}
-	p.syncTransientHotkeysLocked(recording || stopping || p.pendingDone > 0 || errorActive, errorActive)
+	p.syncTransientHotkeysLocked(p.starting || recording || stopping || p.pendingDone > 0 || errorActive, errorActive)
 }
 
 func (p *VoicePlugin) publishErrorLocked(detail string, sessionID uint64) {
@@ -947,6 +1035,7 @@ func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recordin
 		s.ErrorUntil = p.errorUntil
 		s.SessionID = sessionID
 		s.PendingFinishes = pendingDone
+		s.Transcript, s.TranscriptUntil = p.transcript, p.transcriptUntil
 	})
 }
 

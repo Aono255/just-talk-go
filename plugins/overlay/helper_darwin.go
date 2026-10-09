@@ -21,6 +21,7 @@ import (
 type helperCommand struct {
 	Cmd   string `json:"cmd"`
 	Label string `json:"label,omitempty"`
+	Text  string `json:"text,omitempty"`
 	R     uint16 `json:"r,omitempty"`
 	G     uint16 `json:"g,omitempty"`
 	B     uint16 `json:"b,omitempty"`
@@ -50,8 +51,10 @@ func readHelperCommands(input io.Reader) {
 		switch cmd.Cmd {
 		case "show":
 			label := C.CString(cmd.Label)
-			C.jt_overlay_helper_show(label, C.ushort(cmd.R), C.ushort(cmd.G), C.ushort(cmd.B))
+			text := C.CString(cmd.Text)
+			C.jt_overlay_helper_show(label, text, C.ushort(cmd.R), C.ushort(cmd.G), C.ushort(cmd.B))
 			C.free(unsafe.Pointer(label))
+			C.free(unsafe.Pointer(text))
 		case "hide":
 			C.jt_overlay_helper_hide()
 		case "close":

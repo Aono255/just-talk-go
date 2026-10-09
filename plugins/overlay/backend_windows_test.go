@@ -39,7 +39,7 @@ func TestWindowsOverlayIntegration(t *testing.T) {
 	}
 	b := backend.(*windowsOverlayBackend)
 	defer b.Close()
-	if err := b.Show("REC", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}); err != nil {
+	if err := b.Show("REC", "", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}); err != nil {
 		t.Fatalf("show Windows overlay: %v", err)
 	}
 	time.Sleep(250 * time.Millisecond)

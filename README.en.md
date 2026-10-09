@@ -21,6 +21,7 @@ This [fork maintained by Aono255](https://github.com/Aono255/just-talk-go) is ba
 - Doubao streaming ASR with optimized bidirectional streaming and second-pass recognition.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
+- The macOS overlay previews recognition text and keeps the final result visible for 3 seconds. Long previews show the latest 100 characters while the complete result is pasted normally. The `notch` position sits at the top center below the menu bar, including on external displays without a notch.
 - TUI configuration for hotkeys, mode, auto-submit, stop delay, hotwords, and related settings.
 - ASR hotwords for project names, people names, English terms, and domain-specific vocabulary.
 - Usage statistics for total sessions, total recognized characters, average speed, and recent speed.
@@ -33,7 +34,7 @@ Linux, macOS, and Windows desktops are supported:
 | --- | --- | --- |
 | Linux Wayland | Supported | Works with Sway / wlroots; hotkeys use evdev and require input permissions |
 | Linux X11 | Supported | Uses native X11 global hotkeys |
-| macOS | Supported | Global hotkeys use CGEventTap, recording uses CoreAudio, clipboard uses NSPasteboard, and overlay uses AppKit NSPanel |
+| macOS | Supported | Global hotkeys use CGEventTap, recording uses AVFoundation, clipboard uses NSPasteboard, and overlay uses AppKit NSPanel |
 | Windows 10/11 | Supported | Global key polling with a low-level keyboard-hook edge fallback, WinMM recording, Unicode clipboard, SendInput auto-submit, and a Win32 status overlay |
 
 ## macOS: Homebrew Installation And Updates
@@ -58,6 +59,14 @@ brew upgrade Aono255/just-talk/just-talk
 Restart Just Talk after upgrading. `brew update` refreshes the formula and `brew upgrade` installs the new release; an already running process keeps using the old binary.
 
 This fork re-enables the macOS hotkey tap after the system disables it due to a timeout, while respecting user-requested disabling. A native callback regression test covers this path; long-running background hotkey behavior still requires manual trial.
+
+v0.1.3 opens the microphone in a background worker and immediately shows an opening status. Key release and cancellation remain responsive; an abandoned start cannot begin recognition later or create duplicate capture sessions. On macOS, a scoped system activity identifies user-initiated recording and latency-sensitive I/O, and ends when the microphone is released.
+
+macOS uses AVFoundation with the currently selected default microphone and outputs 16 kHz, 16-bit mono PCM. Recording becomes active only after the first audio buffer arrives. A running session reports an error if no buffer arrives within 3 seconds; this timeout does not bound the system startup call itself. System input/output defaults and the microphone's hardware sample rate are unchanged. Unavailable devices fail explicitly without selecting another microphone. On macOS, `voice.device` accepts only an empty value or `default`.
+
+If a Bluetooth microphone remains at `CON`, check other applications' system-audio capture features. During device testing on macOS 26.5.1, both AudioQueue and AVFoundation stalled in the Core Audio device-start wait while microphone authorization remained granted. After disabling Codex Settings → General → Toys → Audio visualizer and reopening JustTalk, repeated recording, recognition, and auto-paste succeeded; startup to the first audio buffer took about 162–453 ms. This supports investigating interactions between system-audio capture and Bluetooth device reconfiguration. Changing the recording API alone does not guarantee removal of such system waits. Microphone permissions need not be changed, and JustTalk must not automatically stop another application's capture.
+
+Captured audio waits in memory without blocking a full pipe while recognition connects. More than 1 MiB of unread PCM (about 32 seconds) fails explicitly. Stop preserves captured tail audio, wakes blocked readers, and releases native resources after reading has stopped. `--verbose` reports device lookup, configuration, startup, and first-buffer timings separately. Native regression tests cover format, buffering, and stop lifecycle; other headset and OS combinations require their own validation.
 
 ## Build
 

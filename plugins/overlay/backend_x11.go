@@ -203,7 +203,7 @@ func newX11Backend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *x11Backend) Show(label string, color statusColor) error {
+func (b *x11Backend) Show(label, _ string, color statusColor) error {
 	if b.dpy == nil {
 		return nil
 	}

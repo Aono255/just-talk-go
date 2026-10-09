@@ -11,7 +11,7 @@ import (
 )
 
 type backend interface {
-	Show(label string, color statusColor) error
+	Show(label, text string, color statusColor) error
 	Hide() error
 	Close() error
 }
@@ -28,6 +28,7 @@ type Plugin struct {
 	backend     backend
 	lastState   string
 	lastLabel   string
+	lastText    string
 	lastVisible bool
 }
 
@@ -76,20 +77,30 @@ func (p *Plugin) Stop() error {
 
 func (p *Plugin) sync(status voice.TUIVoiceStatus) {
 	label, color, visible := displayForStatus(status, p.cfg.IdleVisible)
-	if status.State == p.lastState && label == p.lastLabel && visible == p.lastVisible {
+	text := status.Transcript
+	if status.State == "idle" && !status.TranscriptUntil.After(time.Now()) {
+		text = ""
+	}
+	if runes := []rune(text); len(runes) > 100 {
+		text = "…" + string(runes[len(runes)-100:])
+	}
+	if status.State == p.lastState && label == p.lastLabel && text == p.lastText && visible == p.lastVisible {
 		return
 	}
-	p.lastState, p.lastLabel, p.lastVisible = status.State, label, visible
 
 	if !visible {
 		if err := p.backend.Hide(); err != nil {
 			p.logger.Debug("overlay hide failed", "error", err)
+			return
 		}
+		p.lastState, p.lastLabel, p.lastText, p.lastVisible = status.State, label, text, visible
 		return
 	}
-	if err := p.backend.Show(label, color); err != nil {
+	if err := p.backend.Show(label, text, color); err != nil {
 		p.logger.Debug("overlay show failed", "error", err)
+		return
 	}
+	p.lastState, p.lastLabel, p.lastText, p.lastVisible = status.State, label, text, visible
 }
 
 func displayForStatus(status voice.TUIVoiceStatus, idleVisible bool) (string, statusColor, bool) {
@@ -105,6 +116,9 @@ func displayForStatus(status voice.TUIVoiceStatus, idleVisible bool) (string, st
 	case "error":
 		return "ERR", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	default:
+		if status.State == "idle" && status.Transcript != "" && status.TranscriptUntil.After(time.Now()) {
+			return "DONE", statusColor{R: 80 << 8, G: 210 << 8, B: 145 << 8}, true
+		}
 		return "IDL", statusColor{R: 145 << 8, G: 145 << 8, B: 145 << 8}, idleVisible
 	}
 }

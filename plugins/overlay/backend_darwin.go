@@ -3,6 +3,7 @@
 package overlay
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,9 @@ func newBackend(cfg config.OverlayConfig) (backend, error) {
 		"--overlay-scale", strconv.FormatFloat(cfg.Scale, 'f', -1, 64),
 	)
 	cmd.Stdout = io.Discard
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		cmd.Env = append(os.Environ(), "JUST_TALK_OVERLAY_DEBUG=1")
+	}
 	if errLog, err := os.OpenFile("/tmp/just-talk-overlay.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 		cmd.Stderr = errLog
 	} else {
@@ -49,9 +53,9 @@ func newBackend(cfg config.OverlayConfig) (backend, error) {
 	return &darwinBackend{cmd: cmd, stdin: stdin}, nil
 }
 
-func (b *darwinBackend) Show(label string, color statusColor) error {
+func (b *darwinBackend) Show(label, text string, color statusColor) error {
 	slog.Default().Debug("macOS overlay show", "label", label, "r", color.R, "g", color.G, "b", color.B)
-	return b.send(helperCommand{Cmd: "show", Label: label, R: color.R, G: color.G, B: color.B})
+	return b.send(helperCommand{Cmd: "show", Label: label, Text: text, R: color.R, G: color.G, B: color.B})
 }
 
 func (b *darwinBackend) Hide() error {

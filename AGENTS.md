@@ -59,7 +59,7 @@ Linux:
 macOS:
 
 - Global hotkeys use CGEventTap through `ApplicationServices`.
-- Recording uses CoreAudio / AudioQueue.
+- Recording uses AVFoundation with the selected default microphone and 16 kHz, 16-bit mono PCM. CoreAudio only queries the selected device UID; it does not change system devices or hardware formats. Preserve the first-buffer readiness check, bounded in-memory capture buffer, reader wakeup on stop, and unread tail audio. Do not restore an automatic AudioQueue fallback.
 - Clipboard uses NSPasteboard.
 - Auto-submit posts native keyboard events.
 - Overlay uses an AppKit `NSPanel` helper process.

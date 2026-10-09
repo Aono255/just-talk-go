@@ -146,7 +146,7 @@ func newWaylandBackend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *waylandBackend) Show(label string, color statusColor) error {
+func (b *waylandBackend) Show(label, _ string, color statusColor) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.display == nil || b.closed || b.destroyed {
