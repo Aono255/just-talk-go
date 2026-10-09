@@ -88,9 +88,9 @@ func (c Combo) String() string {
 type EventType int
 
 const (
-	KeyDown   EventType = iota // Key pressed down
-	KeyUp                      // Key released
-	KeyPress                   // Key pressed and quickly released (simulates a "click")
+	KeyDown  EventType = iota // Key pressed down
+	KeyUp                     // Key released
+	KeyPress                  // Key pressed and quickly released (simulates a "click")
 )
 
 // String returns a human-readable event type name.

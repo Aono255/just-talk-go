@@ -14,6 +14,8 @@ package hotkey
 // // ---- Pipe-based event bridge ----
 // static int bridge_fd = -1;
 // static pthread_mutex_t bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
+// // The bridge and tap are used by one provider. Accessed on its run-loop thread.
+// static CFMachPortRef bridge_tap = NULL;
 //
 // typedef enum {
 // 	BRIDGE_KEY_DOWN       = 0,
@@ -48,20 +50,23 @@ package hotkey
 // // ---- CGEventTap callback ----
 // static CGEventRef cg_event_cb(CGEventTapProxy proxy, CGEventType type,
 // 	CGEventRef event, void *refcon) {
-// 	CGKeyCode kc = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
-// 	CGEventFlags fl = CGEventGetFlags(event);
 // 	bridge_event_t evt;
 // 	memset(&evt, 0, sizeof(evt));
-// 	evt.keycode  = (uint16_t)kc;
-// 	evt.flags    = (uint64_t)fl;
-// 	evt.time_ms  = (int64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
 //
 // 	switch (type) {
+// 	case kCGEventTapDisabledByTimeout:
+// 		// Disabled notifications are not keyboard events and may have no payload.
+// 		if (bridge_tap != NULL) CGEventTapEnable(bridge_tap, true);
+// 		return event;
 // 	case kCGEventKeyDown:       evt.event_type = BRIDGE_KEY_DOWN;       break;
 // 	case kCGEventKeyUp:         evt.event_type = BRIDGE_KEY_UP;         break;
 // 	case kCGEventFlagsChanged:  evt.event_type = BRIDGE_FLAGS_CHANGED;   break;
+// 	// Leave taps disabled when the user explicitly requests it.
 // 	default: return event;
 // 	}
+// 	evt.keycode  = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+// 	evt.flags    = (uint64_t)CGEventGetFlags(event);
+// 	evt.time_ms  = (int64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
 // 	bridge_send(&evt);
 // 	return event;
 // }
@@ -75,6 +80,8 @@ package hotkey
 // }
 //
 // static void darwin_enable_tap(CFMachPortRef tap, int enabled) {
+// 	// Clear before intentional shutdown, so a pending notification cannot restart it.
+// 	bridge_tap = enabled ? tap : NULL;
 // 	CGEventTapEnable(tap, enabled ? true : false);
 // }
 //
