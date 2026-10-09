@@ -50,7 +50,7 @@ class JustTalk < Formula
   end
 
   test do
-    assert_match "just-talk v#{{version}}", shell_output("#{{bin}}/just-talk --version")
+    assert_match "just-talk v#{{version}}", shell_output("#{{(bin/"just-talk").to_s.shellescape}} --version")
   end
 end
 '''
