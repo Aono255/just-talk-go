@@ -6,10 +6,10 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: just-talk-release
   cancel-in-progress: false
 
 env:
@@ -67,6 +67,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check stable release tag
+        shell: bash
+        run: '[[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -87,10 +91,11 @@ jobs:
             libxtst-dev
 
       - name: Test
-        if: matrix.goarch == 'amd64'
         env:
           CGO_ENABLED: ${{ matrix.cgo_enabled }}
-        run: go test ./...
+        run: |
+          go test ./...
+          go vet ./...
 
       - name: Build archive with GoReleaser
         uses: goreleaser/goreleaser-action@v7
@@ -103,6 +108,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_VERSION: ${{ github.ref_name }}
 
       - name: Upload archive
         uses: actions/upload-artifact@v6
@@ -118,8 +124,15 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
     steps:
+      - name: Check out maintenance branch
+        uses: actions/checkout@v6
+        with:
+          ref: master
+
       - name: Download archives
         uses: actions/download-artifact@v7
         with:
@@ -150,4 +163,16 @@ jobs:
               --verify-tag \
               --generate-notes \
               --title "${GITHUB_REF_NAME}"
+          fi
+
+      - name: Update Homebrew formula
+        run: |
+          python3 scripts/update_homebrew.py "${GITHUB_REF_NAME}" dist/SHA256SUMS.txt
+          ruby -c Formula/just-talk.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/just-talk.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: 更新 Homebrew 配方至 ${GITHUB_REF_NAME}"
+            git push origin HEAD:master
           fi

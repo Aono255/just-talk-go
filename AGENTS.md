@@ -4,6 +4,8 @@ This file gives coding agents concise guidance for working in this repository.
 
 ## Project
 
+This fork is maintained by Aono255. Its maintenance/default branch is `master`; the upstream remote is `whoamihappyhacking/just-talk-go` and updates should be merged from `upstream/master`, never force-synced over local fixes. Commit messages and PR titles/bodies must be in Chinese, with Conventional Commit prefixes.
+
 Just Talk is a desktop voice input tool. It records with a global hotkey, sends audio to streaming ASR, then copies recognized text to the clipboard or submits it into the focused input field.
 
 The supported desktop targets are Linux, macOS, and Windows.
@@ -26,6 +28,8 @@ JUST_TALK_TEST_WINDOWS_HOTKEY=1 go test ./hotkey -run TestWindowsHookIntegration
 ```
 
 Release builds are configured by `.goreleaser.yaml` and `.github/workflows/release.yml`, using GoReleaser v2 through the official `goreleaser/goreleaser-action`. Pushing a `v*` tag builds and publishes Linux, macOS, and Windows archives for amd64 and arm64, plus `SHA256SUMS.txt`. Linux and macOS release binaries must remain native cgo builds on their respective GitHub-hosted runners. GoReleaser OSS split/merge is not available, so each native matrix runner creates one archive and the final job only merges those archives into the GitHub Release.
+
+Use stable `vMAJOR.MINOR.PATCH` release tags. The workflow passes `RELEASE_VERSION` to GoReleaser to embed the real tag in `--version`, then generates `Formula/just-talk.rb` from published checksums and pushes it to `master` using the built-in token. Update `scripts/update_homebrew.py` rather than hand-editing the generated formula. Homebrew currently supports macOS. Forks do not deploy the copied upstream website automatically.
 
 Do not add or preserve non-cgo macOS fallback builds. A build that compiles but cannot provide native hotkeys, recording, clipboard, auto-submit, or overlay is worse than an explicit build failure.
 
@@ -124,4 +128,4 @@ TUI mode must not write normal logs to stdout/stderr because it corrupts the Bub
 - Keep user-facing doctor output short and action-oriented. Do not list implementation details as checks unless the user can act on them.
 - README is bilingual: update both `README.md` and `README.en.md`.
 - `CHANGELOG.md` should be updated for user-visible behavior changes.
-- The project does not accept pull requests; issues are welcome.
+- The original upstream does not accept pull requests; keep fork maintenance in this repository unless the user requests otherwise.

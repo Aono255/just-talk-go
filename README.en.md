@@ -8,6 +8,8 @@ Just Talk is a desktop voice input tool. It records audio with a global hotkey, 
 
 It is built for people who want to type less and speak more while coding, chatting, writing notes, or working with long text.
 
+This [fork maintained by Aono255](https://github.com/Aono255/just-talk-go) is based on [the original project's master](https://github.com/whoamihappyhacking/just-talk-go/tree/master). Its maintenance branch is `master`, with independent releases and Homebrew updates.
+
 ## Screenshot
 
 ![Just Talk TUI](docs/screenshot-tui.png)
@@ -33,6 +35,29 @@ Linux, macOS, and Windows desktops are supported:
 | Linux X11 | Supported | Uses native X11 global hotkeys |
 | macOS | Supported | Global hotkeys use CGEventTap, recording uses CoreAudio, clipboard uses NSPasteboard, and overlay uses AppKit NSPanel |
 | Windows 10/11 | Supported | Global key polling with a low-level keyboard-hook edge fallback, WinMM recording, Unicode clipboard, SendInput auto-submit, and a Win32 status overlay |
+
+## macOS: Homebrew Installation And Updates
+
+Prebuilt releases are available for Apple Silicon and Intel:
+
+```bash
+brew tap Aono255/just-talk https://github.com/Aono255/just-talk-go
+brew install Aono255/just-talk/just-talk
+just-talk --version
+```
+
+If `wakaka6/tap/just-talk` is already installed, stop its running process with `Ctrl+C`, run `brew uninstall wakaka6/tap/just-talk`, and then install the formula above. Do not use `--zap`; the user configuration at `~/.config/just-talk/config.toml` is preserved. Run only one Just Talk process at a time.
+
+For subsequent updates:
+
+```bash
+brew update
+brew upgrade Aono255/just-talk/just-talk
+```
+
+Restart Just Talk after upgrading. `brew update` refreshes the formula and `brew upgrade` installs the new release; an already running process keeps using the old binary.
+
+This fork re-enables the macOS hotkey tap after the system disables it due to a timeout, while respecting user-requested disabling. A native callback regression test covers this path; long-running background hotkey behavior still requires manual trial.
 
 ## Build
 
@@ -97,7 +122,7 @@ Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`:
 
 ## Release Downloads
 
-GitHub Releases provide prebuilt archives for:
+[This fork's GitHub Releases](https://github.com/Aono255/just-talk-go/releases) provide prebuilt archives for:
 
 - Linux amd64 / arm64
 - macOS Intel / Apple Silicon
@@ -107,9 +132,13 @@ GitHub Releases provide prebuilt archives for:
 The release workflow uses GoReleaser v2 with the official `goreleaser/goreleaser-action`. Linux, macOS, and Windows binaries are built natively on matching GitHub-hosted runners. Maintainers can build and publish a release by pushing a `v*` tag, for example:
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.1.2
+git push origin master v0.1.2
 ```
+
+Use stable `vMAJOR.MINOR.PATCH` tags. After all native builds and tests succeed, the workflow publishes archives and checksums, then commits the updated `Formula/just-talk.rb` to this repository using the built-in GitHub token. No extra PAT is required. The formula currently supports macOS; Linux and Windows users can use release archives or build from source.
+
+To follow upstream, point the `upstream` remote at `https://github.com/whoamihappyhacking/just-talk-go.git`, then run `git fetch upstream master` and `git merge upstream/master`. Validate the result before pushing and releasing a new tag. Do not force-sync over this fork's fixes.
 
 ## Usage
 
@@ -191,9 +220,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## Maintenance And Contributions
 
-Just Talk is maintained by `whoamihappyhacking`.
-
-This project does not accept pull requests. Issues are welcome for bug reports, usage feedback, and feature discussion.
+The original Just Talk project was created and is maintained by `whoamihappyhacking`; this fork is maintained by `Aono255`. Upstream does not accept pull requests. Report issues for this fork in [this repository's Issues](https://github.com/Aono255/just-talk-go/issues).
 
 ## License
 
@@ -201,7 +228,7 @@ Just Talk is licensed under the GNU General Public License v3.0.
 
 ## Project website
 
-Visit the [Just Talk website](https://whoamihappyhacking.github.io/just-talk-go/). GitHub Actions automatically deploys updates to `website/` pushed to `master`.
+Visit the [original Just Talk website](https://whoamihappyhacking.github.io/just-talk-go/). This fork retains the website source; automatic Pages deployment is enabled only in the original repository.
 
 The static introduction in `website/` includes features, platform support, quick-start instructions, and a simulated demo that does not use the microphone. Preview it with:
 

@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.repository == 'whoamihappyhacking/just-talk-go'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

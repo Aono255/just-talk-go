@@ -22,7 +22,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
+	versionOnly := flag.Bool("version", false, "print version and exit")
 	backend := flag.String("backend", "", "force backend")
 	cfgPath := flag.String("config", "", "path to config file")
 	debug := flag.Bool("debug", false, "enable debug plugin")
@@ -35,6 +41,10 @@ func main() {
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
 	flag.Parse()
+	if *versionOnly {
+		fmt.Printf("just-talk %s (%s)\n", version, commit)
+		return
+	}
 	if *installOnly {
 		if err := installSelf(); err != nil {
 			fmt.Fprintf(os.Stderr, "install failed: %v\n", err)

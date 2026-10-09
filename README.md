@@ -6,6 +6,8 @@
 
 Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快捷键录音，把语音识别结果复制到剪贴板，或直接上屏到当前输入框，适合写代码、聊天、记笔记和处理长文本输入。
 
+本仓库是 [Aono255 维护的 fork](https://github.com/Aono255/just-talk-go)，代码基于 [原项目的 master](https://github.com/whoamihappyhacking/just-talk-go/tree/master)。我们使用 `master` 作为维护分支，独立发布版本和 Homebrew 更新。
+
 在 TUI 中修改 App Key 或 Access Key 后，退出编辑模式并按 `s` 保存；下一次录音会使用新凭证，无需重启。正在识别的录音继续使用建立连接时的凭证。
 
 ## 截图
@@ -33,6 +35,29 @@ Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快�
 | Linux X11 | 已支持 | 使用 X11 原生全局热键 |
 | macOS | 已支持 | 全局快捷键基于 CGEventTap，录音使用 CoreAudio，剪贴板使用 NSPasteboard，胶囊显示使用 AppKit NSPanel |
 | Windows 10/11 | 已支持 | 全局按键轮询及低级键盘钩子边沿回退、WinMM 录音、Unicode 剪贴板、SendInput 自动上屏和 Win32 状态胶囊 |
+
+## macOS：Homebrew 安装与更新
+
+首次安装（Apple Silicon 和 Intel 均提供预编译版本）：
+
+```bash
+brew tap Aono255/just-talk https://github.com/Aono255/just-talk-go
+brew install Aono255/just-talk/just-talk
+just-talk --version
+```
+
+如果已经安装 `wakaka6/tap/just-talk`，先在运行它的终端按 `Ctrl+C`，再执行 `brew uninstall wakaka6/tap/just-talk`，然后安装上面的版本。卸载命令不带 `--zap`，用户配置 `~/.config/just-talk/config.toml` 保留；同一时间只运行一个 Just Talk。
+
+之后更新：
+
+```bash
+brew update
+brew upgrade Aono255/just-talk/just-talk
+```
+
+更新完成后重启正在运行的 Just Talk 进程。`brew update` 更新 Formula，`brew upgrade` 安装新版本；正在运行的旧进程不会自动切换。
+
+macOS 热键监听被系统因超时禁用时，本 fork 会自动重新启用监听。用户主动禁用监听时保持禁用。此路径有原生回调回归测试；后台长时间使用后的实际热键表现仍需试用确认。
 
 ## 构建
 
@@ -97,7 +122,7 @@ Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`：
 
 ## Release 下载
 
-GitHub Release 提供以下预编译归档：
+[本 fork 的 GitHub Release](https://github.com/Aono255/just-talk-go/releases) 提供以下预编译归档：
 
 - Linux amd64 / arm64
 - macOS Intel / Apple Silicon
@@ -107,9 +132,13 @@ GitHub Release 提供以下预编译归档：
 发布流程使用 GoReleaser v2 和官方 `goreleaser/goreleaser-action`。Linux、macOS 和 Windows 二进制分别在对应的 GitHub 托管 runner 上原生构建；维护者推送 `v*` 标签时会自动构建并发布，例如：
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.1.2
+git push origin master v0.1.2
 ```
+
+使用稳定版本标签 `v主版本.次版本.修订版本`。所有平台构建和测试成功后，工作流发布归档与校验值，再自动提交本仓库的 `Formula/just-talk.rb`。它只使用 GitHub 内置令牌，不需要额外 PAT。Formula 当前提供 macOS 安装；Linux 和 Windows 使用 Release 归档或自行构建。
+
+跟进原项目时，先将 `upstream` 指向 `https://github.com/whoamihappyhacking/just-talk-go.git`，再执行 `git fetch upstream master` 和 `git merge upstream/master`；验证后提交到本仓库并发布新标签。不要使用强制同步覆盖本 fork 的修复。
 
 ## 使用
 
@@ -191,9 +220,7 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 
 ## 维护与贡献
 
-Just Talk 由 `whoamihappyhacking` 维护。
-
-本项目不接受 Pull Request。欢迎通过 Issue 反馈 bug、使用体验和功能建议。
+原项目 Just Talk 由 `whoamihappyhacking` 创建和维护；本 fork 由 `Aono255` 维护。原项目不接受 Pull Request。本 fork 的问题请反馈到[本仓库的 Issues](https://github.com/Aono255/just-talk-go/issues)。
 
 ## 许可证
 
@@ -201,7 +228,7 @@ Just Talk 使用 GNU General Public License v3.0 开源。
 
 ## 项目介绍网页
 
-在线访问：[Just Talk 项目介绍页](https://whoamihappyhacking.github.io/just-talk-go/)。推送 `website/` 更新到 `master` 后，GitHub Actions 会自动部署到 GitHub Pages。
+在线访问：[原项目的 Just Talk 介绍页](https://whoamihappyhacking.github.io/just-talk-go/)。本 fork 保留网页源码，Pages 自动部署仅在原项目仓库启用。
 
 静态介绍页位于 `website/`，包含功能、平台支持、快速开始与不调用麦克风的交互演示。启动预览：
 
