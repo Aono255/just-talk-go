@@ -31,6 +31,8 @@ Release builds are configured by `.goreleaser.yaml` and `.github/workflows/relea
 
 Use stable `vMAJOR.MINOR.PATCH` release tags. The workflow passes `RELEASE_VERSION` to GoReleaser to embed the real tag in `--version`, then generates `Formula/just-talk.rb` from published checksums and pushes it to `master` using the built-in token. Update `scripts/update_homebrew.py` rather than hand-editing the generated formula. Homebrew and macOS prebuilt releases require macOS 15 or later; keep the cgo deployment flags and formula requirement aligned. Forks do not deploy the copied upstream website automatically.
 
+`.github/workflows/homebrew.yml` validates real installation on both macOS architectures after formula publication, and supports manual dispatch. Keep those installation checks when changing packaging.
+
 Do not add or preserve non-cgo macOS fallback builds. A build that compiles but cannot provide native hotkeys, recording, clipboard, auto-submit, or overlay is worse than an explicit build failure.
 
 Useful runtime commands:

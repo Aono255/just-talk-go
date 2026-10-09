@@ -176,3 +176,8 @@ jobs:
             git commit -m "chore: 更新 Homebrew 配方至 ${GITHUB_REF_NAME}"
             git push origin HEAD:master
           fi
+
+  homebrew:
+    name: Verify Homebrew installation
+    needs: release
+    uses: ./.github/workflows/homebrew.yml

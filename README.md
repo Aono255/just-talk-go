@@ -138,6 +138,8 @@ git push origin master v0.1.3
 
 使用稳定版本标签 `v主版本.次版本.修订版本`。所有平台构建和测试成功后，工作流发布归档与校验值，再自动提交本仓库的 `Formula/just-talk.rb`。它只使用 GitHub 内置令牌，不需要额外 PAT。Formula 当前提供 macOS 安装；Linux 和 Windows 使用 Release 归档或自行构建。
 
+发布后会在干净的 Apple Silicon 和 Intel macOS runner 上执行实际的 `brew tap`、`brew install` 和 `brew test`。也可以手动运行“Homebrew 安装验证”工作流检查当前配方。
+
 跟进原项目时，先将 `upstream` 指向 `https://github.com/whoamihappyhacking/just-talk-go.git`，再执行 `git fetch upstream master` 和 `git merge upstream/master`；验证后提交到本仓库并发布新标签。不要使用强制同步覆盖本 fork 的修复。
 
 ## 使用

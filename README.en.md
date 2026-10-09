@@ -138,6 +138,8 @@ git push origin master v0.1.3
 
 Use stable `vMAJOR.MINOR.PATCH` tags. After all native builds and tests succeed, the workflow publishes archives and checksums, then commits the updated `Formula/just-talk.rb` to this repository using the built-in GitHub token. No extra PAT is required. The formula currently supports macOS; Linux and Windows users can use release archives or build from source.
 
+After publishing, clean Apple Silicon and Intel macOS runners execute real `brew tap`, `brew install`, and `brew test` commands. The Homebrew installation validation workflow can also be dispatched manually for the current formula.
+
 To follow upstream, point the `upstream` remote at `https://github.com/whoamihappyhacking/just-talk-go.git`, then run `git fetch upstream master` and `git merge upstream/master`. Validate the result before pushing and releasing a new tag. Do not force-sync over this fork's fixes.
 
 ## Usage

@@ -1,0 +1,32 @@
+name: Homebrew 安装验证
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Homebrew Apple Silicon
+            runner: macos-15
+          - name: Homebrew Intel
+            runner: macos-15-intel
+    steps:
+      - name: Install and test published formula
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_DEVELOPER: "1"
+        run: |
+          brew tap Aono255/just-talk https://github.com/Aono255/just-talk-go
+          brew install Aono255/just-talk/just-talk
+          brew test Aono255/just-talk/just-talk
+          just-talk --version
