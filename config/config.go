@@ -22,6 +22,7 @@ type Config struct {
 type CorrectionConfig struct {
 	Provider  string   `toml:"provider"`
 	Enabled   bool     `toml:"enabled"`
+	Learning  bool     `toml:"learning"`
 	BaseURL   string   `toml:"base_url"`
 	Model     string   `toml:"model"`
 	APIKey    string   `toml:"api_key"`
@@ -66,7 +67,7 @@ func Default() *Config {
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
 		},
-		Correction: CorrectionConfig{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-flash", TimeoutMS: 8000},
+		Correction: CorrectionConfig{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-flash", TimeoutMS: 8000, Learning: true},
 	}
 }
 

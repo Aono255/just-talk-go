@@ -27,6 +27,9 @@ func TestSavePassesNewCredentialsToReload(t *testing.T) {
 		if model.fields[i].key == "correction_terms" {
 			model.fields[i].input.SetValue("ClawOps, 两高一弱，G01, ClawOps")
 		}
+		if model.fields[i].key == "correction_learning" {
+			model.fields[i].boolVal = false
+		}
 		if model.fields[i].key == "boosting_table_id" {
 			model.fields[i].input.SetValue(" cloud-table-id ")
 		}
@@ -50,6 +53,9 @@ func TestSavePassesNewCredentialsToReload(t *testing.T) {
 	if saved.Voice.BoostingTableID != "cloud-table-id" || reloaded.Voice.BoostingTableID != "cloud-table-id" {
 		t.Fatal("cloud hotword table ID was not saved and reloaded")
 	}
+	if saved.Correction.Learning || reloaded.Correction.Learning {
+		t.Fatal("self-learning toggle was not saved and reloaded")
+	}
 	expected := []string{"ClawOps", "两高一弱", "G01"}
 	if !reflect.DeepEqual(saved.Correction.Terms, expected) || !reflect.DeepEqual(reloaded.Correction.Terms, expected) || !reflect.DeepEqual(saved.Voice.Hotwords, original.Voice.Hotwords) {
 		t.Fatal("AI terms were not saved/reloaded independently from ASR hotwords")
@@ -63,7 +69,7 @@ func TestCorrectionKeyIsMaskedAndConfigurationViewportFits(t *testing.T) {
 	cfg.Correction.Terms = []string{"ClawOps", strings.Repeat("术语", 100)}
 	model := New(cfg)
 	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	for _, key := range []string{"correction_api_key", "correction_terms", "boosting_table_id"} {
+	for _, key := range []string{"correction_api_key", "correction_terms", "correction_learning", "boosting_table_id"} {
 		for i, f := range model.fields {
 			if f.key == key {
 				model.cursor = i

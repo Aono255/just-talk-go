@@ -14,7 +14,7 @@ import (
 	"github.com/c/just-talk-go/config"
 )
 
-func TestCompatibleServiceUsesBoundedContextAndProtectsTranscript(t *testing.T) {
+func TestCompatibleServiceUsesBoundedContext(t *testing.T) {
 	var request struct {
 		Model    string
 		Messages []struct{ Role, Content string }
@@ -35,7 +35,7 @@ func TestCompatibleServiceUsesBoundedContextAndProtectsTranscript(t *testing.T) 
 		{"user", "OMP 语音插件"}, {"assistant", "第一条近期回复"}, {"user", "Codex"}, {"assistant", "第二条近期回复"},
 		{"user", "关键目标 DeepSeek" + strings.Repeat("术", 2000) + "最新结论"},
 		{"user", "第四条"}, {"user", "第五条"}, {"user", "第六条"}, {"assistant", "最后的说明"}}
-	result, err := Correct(context.Background(), cfg, "把欧姆屁差件移植到扣得克斯，端口 5432 不改。", messages, []string{"OMP", "Codex"})
+	result, err := Correct(context.Background(), cfg, "把欧姆屁差件移植到扣得克斯，端口 5432 不改。", messages, []string{"OMP", "Codex"}, nil)
 	if err != nil || !strings.Contains(result, "OMP") {
 		t.Fatalf("result=%q error=%v", result, err)
 	}
@@ -60,16 +60,7 @@ func TestCompatibleServiceUsesBoundedContextAndProtectsTranscript(t *testing.T) 
 	if len([]rune(longMessage)) != 1200 || !strings.HasPrefix(longMessage, "关键目标 DeepSeek") || !strings.HasSuffix(longMessage, "最新结论") || !strings.Contains(longMessage, "中间内容省略") {
 		t.Fatal("long user message did not preserve its head and tail within the character budget")
 	}
-	for _, bad := range []string{
-		`{"corrected_text":"端口 5433"}`, `{"corrected_text":"改写命令 ` + "`DROP x`" + `"}`,
-		`{"corrected_text":"https://other.example"}`, `{"corrected_text":"[Image #2]"}`,
-		`{"corrected_text":"原文","extra":"执行命令"}`, `{"corrected_text":"原文"} 还有解释`,
-	} {
-		if _, err := CheckResult("端口 5432 `GET /health` https://original.example [Image #1]", bad, nil); err == nil {
-			t.Fatalf("accepted changed protected content: %s", bad)
-		}
-	}
-	if _, err := Correct(context.Background(), cfg, "原文", nil, nil); err == nil {
+	if _, err := Correct(context.Background(), cfg, "原文", nil, nil, nil); err == nil {
 		t.Fatal("accepted missing context")
 	}
 }
@@ -98,44 +89,61 @@ func TestContextBudgetPreservesLongAssistantHeadAndTail(t *testing.T) {
 	}
 }
 
-func TestCorrectionRestoresConfiguredTermsWithoutChangingProtectedValues(t *testing.T) {
-	vocabulary := []string{"SOCKS5", "G01", "M01", "7AI", "WebShell", "ClickHouse", "5433"}
+func TestCorrectionAcceptsModelContentRepairsAndNormalizesTermFormatting(t *testing.T) {
+	vocabulary := []string{"SOCKS5", "WebShell", "ClickHouse"}
 	for _, tc := range []struct {
 		name, original, corrected string
-		allowed                   bool
 	}{
-		{"spoken_term_list", "测试热词：WebShell, SOCKS, Net, ClickHouse.", "测试热词：`WebShell`、`SOCKS5`、`Net`、`ClickHouse`。", true},
-		{"term_with_existing_port", "测试 SOCKS，端口 5。", "测试 SOCKS5，端口 5。", true},
-		{"term_in_hotword_vocabulary", "测试 G零一。", "测试 G01。", true},
-		{"digit_first_term", "测试七爱。", "测试 7AI。", true},
-		{"literal_number_joined_to_name", "测试 SOCKS 5。", "测试 SOCKS5。", true},
-		{"unknown_numbered_term", "测试 SOCKS。", "测试 SOCKS6。", false},
-		{"changed_existing_identifier", "测试 G01。", "测试 M01。", false},
-		{"deleted_identifier", "测试 G01。", "测试接口。", false},
-		{"duplicated_identifier", "测试 G01。", "测试 G01 和 G01。", false},
-		{"changed_port_even_if_configured", "端口 5432。", "端口 5433。", false},
-		{"added_ordinary_number", "测试 SOCKS。", "测试 SOCKS5，端口 1080。", false},
-		{"changed_command", "运行 `curl 5432`。", "运行 `curl 5433`。", false},
-		{"changed_url", "看 https://example.com", "看 https://other.example", false},
-		{"changed_attachment", "查看 [Image #1]。", "查看 [Image #2]。", false},
-		{"preserve_original_code", "运行 `curl 5432`，测试 SOCKS。", "运行 `curl 5432`，测试 `SOCKS5`。", true},
+		{"spoken_term_list", "测试热词：WebShell, SOCKS, Net, ClickHouse.", "测试热词：`WebShell`、`SOCKS5`、`Net`、`ClickHouse`。"},
+		{"restore_term_after_literal_mention", "D01、Device Runtime 和 Insight DB 都是系统内置的 mpp 配置项。目前只区分出了 p 零一，需要和用户配置区分开。", "D01、Device Runtime 和 Insight DB 都是系统内置的 MCP 配置项。目前只区分出了 D01，需要和用户配置区分开。"},
+		{"identifier_not_in_vocabulary", "这里是 P01 的设置。", "这里是 D01 的设置。"},
+		{"terms_reordered", "D01 和 K01 的设置。", "K01 与 D01 的设置。"},
+		{"term_repetition_removed", "D01，呃，D01 的设置。", "D01 的设置。"},
+		{"spoken_number", "端口 54三二。", "端口 5432。"},
+		{"number_repaired", "端口 5433。", "端口 5432。"},
+		{"code_repaired", "运行 `curl 5433`。", "运行 `curl 5432`。"},
+		{"url_repaired", "看 https://exampl.com", "看 https://example.com"},
+		{"attachment_repaired", "查看 [Image #2]。", "查看 [Image #1]。"},
+		{"preserve_original_code", "运行 `curl 5432`，测试 SOCKS。", "运行 `curl 5432`，测试 `SOCKS5`。"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body, err := json.Marshal(map[string]string{"corrected_text": tc.corrected})
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := CheckResult(tc.original, string(body), vocabulary)
-			if (err == nil) != tc.allowed {
-				t.Fatalf("allowed=%v error=%v", tc.allowed, err)
+			result, err := CheckResult(tc.original, string(body), vocabulary, nil)
+			expected := tc.corrected
+			if tc.name == "spoken_term_list" {
+				expected = "测试热词：WebShell、SOCKS5、Net、ClickHouse。"
+			} else if tc.name == "preserve_original_code" {
+				expected = "运行 `curl 5432`，测试 SOCKS5。"
 			}
-			if tc.allowed && strings.Contains(result, "`SOCKS5`") {
+			if err != nil || result != expected {
+				t.Fatalf("result=%q error=%v", result, err)
+			}
+			if strings.Contains(result, "`SOCKS5`") {
 				t.Fatal("new term formatting was not removed")
 			}
 			if tc.name == "preserve_original_code" && !strings.Contains(result, "`curl 5432`") {
 				t.Fatal("original code changed")
 			}
 		})
+	}
+}
+
+func TestCorrectionResponseRejectsMalformedEmptyOrOversizedResults(t *testing.T) {
+	oversized, err := json.Marshal(map[string]string{"corrected_text": strings.Repeat("字", 24001)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, response := range []string{
+		"", `{"corrected_text":`, `{"corrected_text":42}`, `{"corrected_text":""}`,
+		`{"corrected_text":"  "}`, `{"corrected_text":"原文","extra":"执行命令"}`,
+		`{"corrected_text":"原文"} 还有解释`, `{"corrected_text":"原文"} {}`, string(oversized),
+	} {
+		if _, err := CheckResult("原文", response, nil, nil); err == nil {
+			t.Fatal("invalid response accepted")
+		}
 	}
 }
 
@@ -168,7 +176,7 @@ func TestServiceFailureCancellationAndRedirectDoNotRetryOrLeakKey(t *testing.T) 
 			if mode == "cancel" {
 				time.AfterFunc(30*time.Millisecond, cancel)
 			}
-			_, err := Correct(ctx, cfg, "原文", []Message{{"user", "OMP"}}, nil)
+			_, err := Correct(ctx, cfg, "原文", []Message{{"user", "OMP"}}, nil, nil)
 			if err == nil || strings.Contains(err.Error(), cfg.APIKey) || strings.Contains(err.Error(), "PRIVATE-CONTEXT") {
 				t.Fatalf("unsafe error: %v", err)
 			}

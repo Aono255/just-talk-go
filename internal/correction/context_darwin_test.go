@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +29,64 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestNativeFeedbackRequiresOriginalChatAnchorAndSelectsFirstSentMessage(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "feedback.m")
+	program := `#include "context_darwin.m"
+#include <assert.h>
+int main(void) { @autoreleasepool {
+    jt_correction_target previous={0}, current={0};
+    previous.pid=current.pid=100;
+    previous.main=current.main=(AXUIElementRef)@"same-main";
+    previous.editor=current.editor=(AXUIElementRef)@"same-editor";
+    previous.userAnchor=(AXUIElementRef)@"original-anchor";
+    previous.messages=@[@{@"role":@"user",@"text":@"old-user-message"}];
+    current.users=@[previous.messages[0],@{@"role":@"user",@"text":@"user-edited D01"},@{@"role":@"user",@"text":@"later-unrelated-message"}];
+    current.userAnchors=@[@"original-anchor",@"sent-anchor",@"later-anchor"];
+    char *text=NULL;
+    assert(jt_correction_submitted_after(&current,&previous,&text)==1);
+    assert(strcmp(text,"user-edited D01")==0); free(text); text=NULL;
+    current.pid=200;
+    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
+    current.pid=100; current.main=(AXUIElementRef)@"different-main";
+    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
+    current.main=previous.main; current.editor=(AXUIElementRef)@"different-editor";
+    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
+    current.editor=previous.editor;
+    current.userAnchors=@[@"replacement-anchor",@"sent-anchor",@"later-anchor"];
+    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
+    current.userAnchors=@[@"original-anchor",@"sent-anchor",@"later-anchor"];
+    current.users=@[@{@"role":@"user",@"text":@"edited-old-message"},@{@"role":@"user",@"text":@"user-edited D01"},@{@"role":@"user",@"text":@"later-unrelated-message"}];
+    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
+    current.users=previous.messages; current.userAnchors=@[@"original-anchor"];
+    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
+    NSMutableArray *messages=[NSMutableArray array], *anchors=[NSMutableArray array], *parts=[NSMutableArray array];
+    for (int i=0;i<105;i++) {
+        [parts addObject:[NSString stringWithFormat:@"message-%d",i]];
+        flushMessage(messages,i%2?@"assistant":@"user",parts,(AXUIElementRef)[NSString stringWithFormat:@"anchor-%d",i],anchors);
+    }
+    assert(messages.count==100);
+    NSArray *users=[messages filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"role == 'user'"]];
+    assert(users.count==anchors.count);
+    assert([anchors[0] isEqual:@"anchor-6"]);
+} return 0; }`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	include, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "feedback")
+	cmd := exec.Command("xcrun", "--sdk", "macosx", "clang", "-x", "objective-c", "-I", include, source, "-framework", "AppKit", "-framework", "ApplicationServices", "-o", binary)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile native feedback fixture: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(binary).CombinedOutput(); err != nil {
+		t.Fatalf("native feedback binding failed: %v\n%s", err, output)
+	}
 }
 
 func TestFreshApplicationQueryDoesNotReusePreviousApp(t *testing.T) {

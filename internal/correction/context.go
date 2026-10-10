@@ -14,6 +14,8 @@ type Target struct {
 	AvailableAssistants int
 	Guard               func() error
 	Close               func()
+	SubmittedAfter      func(*Target) (string, bool)
+	platform            any
 }
 
 func Capture() (*Target, error) { return capturePlatform() }

@@ -82,6 +82,7 @@ func New(cfg *config.Config) *Model {
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 		{label: "火山热词表 ID", key: "boosting_table_id", help: "填写后识别使用云端词表；留空使用热词", fType: fString, input: ti(vc.BoostingTableID)},
 		{label: "Codex 纠错", key: "correction_enabled", help: "macOS：结合当前聊天整理识别文字，再上屏", fType: fToggle, boolVal: cc.Enabled},
+		{label: "纠错自学习", key: "correction_learning", help: "下次录音核对上一段发送内容；本机保存术语和表达偏好", fType: fToggle, boolVal: cc.Learning},
 		{label: "AI 纠错术语", key: "correction_terms", help: "逗号分隔；仅供纠错模型参考，不传给语音识别", fType: fString, input: ti(strings.Join(cc.Terms, ", "))},
 		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
 		{label: "模型服务地址", key: "correction_base_url", help: "OpenAI 兼容 Base URL，通常含 /v1", fType: fString, input: ti(cc.BaseURL)},
@@ -253,6 +254,8 @@ func (m *Model) save() {
 			vc.BoostingTableID = strings.TrimSpace(f.input.Value())
 		case "correction_enabled":
 			next.Correction.Enabled = f.boolVal
+		case "correction_learning":
+			next.Correction.Learning = f.boolVal
 		case "correction_terms":
 			next.Correction.Terms = splitList(f.input.Value())
 		case "correction_provider":

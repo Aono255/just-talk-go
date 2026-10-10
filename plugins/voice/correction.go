@@ -42,8 +42,13 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 		p.dispatchTextOutput(text, session.autoSubmit)
 		return
 	}
+	retained := false
 	if target != nil {
-		defer target.Close()
+		defer func() {
+			if !retained {
+				target.Close()
+			}
+		}()
 	}
 	if !p.correctionSessionCurrent(session.sessionID) {
 		return
@@ -89,7 +94,8 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 	p.logger.Info("correction context", "available_user_messages", target.AvailableUsers, "available_assistant_messages", target.AvailableAssistants, "user_messages", users, "assistant_messages", assistants, "context_chars", chars, "mentions_deepseek", mentionsDeepSeek)
 	pout("✨ 纠错中 · 上下文用户 %d / 助手 %d · %d 字符", users, assistants, chars)
 	started := time.Now()
-	corrected, err := correction.Correct(ctx, session.correction, text, target.Messages, session.hotwords)
+	learning := p.prepareLearning(session.sessionID, target, session.correction.Learning)
+	corrected, err := correction.Correct(ctx, session.correction, text, target.Messages, session.hotwords, learning)
 	if !p.correctionSessionCurrent(session.sessionID) || ctx.Err() != nil {
 		return
 	}
@@ -128,6 +134,23 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 		return
 	}
 	p.updateTranscript(session.sessionID, corrected)
+	if session.correction.Learning {
+		retained = p.retainLearningTarget(session.sessionID, target, text, corrected)
+		if learning != nil && learning.Error != nil {
+			p.logger.Warn("correction learning response invalid", "error", learning.Error)
+			pout("🧠 %s；整理结果已输出", learning.Error)
+		}
+		if retained && learning != nil && len(learning.Updates) > 0 {
+			count, err := correction.Remember(CorrectionMemoryPath(), learning.Updates)
+			if err != nil {
+				p.logger.Warn("correction memory save failed", "error", err)
+				pout("🧠 自学习记忆保存失败；整理结果已输出")
+			} else {
+				p.logger.Info("correction memory updated", "notes", count, "updates", len(learning.Updates))
+				pout("🧠 自学习记忆 %d 条 · 本次提炼 %d 条", count, len(learning.Updates))
+			}
+		}
+	}
 	p.logger.Info("correction completed", "model", session.correction.Model,
 		"duration_ms", time.Since(started).Milliseconds(), "context_messages", len(target.Messages), "text_len", len(corrected))
 	pout("✨ 已纠错整理 (%dms)", time.Since(started).Milliseconds())

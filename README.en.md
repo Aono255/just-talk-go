@@ -16,6 +16,7 @@ This [fork maintained by Aono255](https://github.com/Aono255/just-talk-go) is ba
 | Streaming recognition and paste | Volcengine Doubao ASR; automatic paste or clipboard-only output. Automatic paste does not press Enter to send a message |
 | Codex context correction | **macOS only, disabled by default**. Reads the current conversation after recognition, then corrects with DeepSeek or an OpenAI-compatible service |
 | Independent AI glossary | Project names, technical terms and abbreviations for the correction model, maintained separately from recognition hotwords |
+| Correction learning | Learns terminology repairs and writing preferences from confirmed sent messages; only compact references are stored locally |
 | Local and cloud recognition hotwords | Inline hotwords or a Volcengine self-learning hotword table ID; cloud tables must be bound in the client |
 | Chinese recording overlay | On macOS: audio level, transcript preview, AI animation, completion result and visible change highlighting |
 | TUI settings and statistics | Scrolling configuration, help and logs, save/reload, session count, total characters and average/recent speed |
@@ -127,6 +128,7 @@ Fill these TUI settings, then enable “Codex 纠错” and save:
 | 模型 API Key | Enter the service's key locally; masked while viewing and editing |
 | 纠错超时(ms) | `8000` by default; allowed range `500`–`30000` |
 | AI 纠错术语 | English or Chinese comma separators, e.g. `Codex, DeepSeek, SOCKS5, WebShell, ClickHouse` |
+| 纠错自学习 | Enabled by default; only active with Codex correction, and can be switched off and saved |
 
 DeepSeek mode explicitly disables thinking and enables JSON output; see the [official API reference](https://api-docs.deepseek.com/api/create-chat-completion/). Other services must support `POST /chat/completions`, Bearer authentication and `choices[].message.content`, returning the expected JSON text. Just Talk sends HTTP requests directly and reuses connections, without starting Codex CLI, automatically switching models, or retrying against another service.
 
@@ -156,11 +158,29 @@ Within five seconds, return to the current Codex conversation and focus the draf
 
 ### Correction scope and failure handling
 
-The model fixes transcription errors, technical terms, grammar, punctuation and paragraphs, and removes meaningless hesitation/repetition while preserving intent and tone. Configured numbered terms can be restored, for example `SOCKS` → `SOCKS5`.
+The model uses the current conversation to repair transcription errors and technical terms, organize grammar, punctuation and paragraphs, and remove meaningless hesitation/repetition into concise written language. The prompt asks it to preserve intent, stance and request strength, avoid expansion or new requirements, and keep uncertain content unchanged.
 
-Existing numbers, identifiers, code, URLs and attachment markers remain checked. Changing `G01` to `M01`, changing a port, deleting or duplicating an existing identifier is rejected. Newly added single-backtick formatting around verifiable terms is removed; existing code formatting is preserved.
+Transcribed numbers, identifiers, abbreviations, URLs or code can also be wrong and may be corrected when speech or conversation context provides clear evidence. Hotwords and AI terms are references, not an allowlist: a later misheard mention can still be restored to `D01` when the transcript already contains that name.
+
+From `v0.1.10`, exact comparisons of numbers, terms, identifiers, code, URLs or attachments no longer block output. The program checks response format, text length and service response completeness, retaining timeouts, cancellation and current conversation/input binding checks. Newly added single-backtick formatting around verifiable terms is still removed. Correction quality depends on the transcript, conversation context, glossary and model.
 
 Service errors, timeouts, validation failures or target changes preserve the raw transcript in the clipboard, display a specific error and stop automatic paste. You can paste the raw text manually. Escape or a new recording cancels an in-flight model request. Misrecognition and insufficient context can still affect quality; a glossary does not guarantee correct recovery every time.
+
+### Using correction learning
+
+1. Keep Codex correction and learning enabled. Edit the corrected draft as needed, then send it manually.
+2. Within 30 minutes, dictate again in the same conversation. The program checks the previous main region, input field and user-message anchor, then selects the first actual user message sent after that anchor.
+3. The previous raw transcript, AI result and sent text are included as feedback in this correction request. Reusable terminology or writing preferences proposed by the model are saved after the current result is successfully delivered.
+
+Learning makes no extra model request and does not continuously monitor conversations. Unsent drafts, changed conversations, edited older messages or unmatched anchors produce no feedback. Each raw/corrected/sent text is limited to 2,000 characters; larger samples skip learning while correction continues. Disabling learning, quitting, or dictating additional segments without sending discards the previous pending sample.
+
+At most 32 compact notes of 120 characters each are stored, without full edit samples or conversation text, in `~/.local/state/just-talk/correction-memory.json`, or `just-talk` under `XDG_STATE_HOME` when set. Later Codex conversations reuse these references; the prompt prioritizes current context when it conflicts with memory. This supplies references to requests rather than training model weights. Learning failures are reported without blocking the corrected result.
+
+```bash
+just-talk --show-correction-memory
+```
+
+After quitting the running program, use `just-talk --clear-correction-memory` to clear learned notes. Manual hotwords, the AI glossary and keys are unaffected.
 
 ## Choosing between three vocabulary settings
 
@@ -238,6 +258,7 @@ language = "zh-CN"                     # Retained field; see note below
 
 [correction]
 enabled = false
+learning = true                       # Learning, active only with Codex correction
 provider = "deepseek"                  # Or openai-compatible
 base_url = "https://api.deepseek.com"
 model = "deepseek-flash"
@@ -270,6 +291,8 @@ hotkeys = []
 | `just-talk --debug` | TUI hotkey receipt, queue and handling diagnostics |
 | `just-talk --backend wayland` / `--backend x11` | Force a Linux backend; also supports `JUST_TALK_BACKEND` |
 | `just-talk --install` | Install this binary into Linux/macOS `~/.local/bin` or Windows `%LOCALAPPDATA%\Programs\Just Talk` |
+| `just-talk --show-correction-memory` | Show compact local correction memories without recording, networking or reading configuration |
+| `just-talk --clear-correction-memory` | Quit the running program first, then clear learned memories without changing hotwords, glossary or keys |
 
 Additional hotkey event logging without the TUI requires both `--debug` and `[debug].enabled = true`; `debug.hotkeys` selects the combinations to observe.
 
@@ -293,9 +316,9 @@ macOS enters recording only after receiving its first audio buffer. It waits up 
 
 Confirm voice input is enabled and saved. Check the launching terminal's Accessibility permission on macOS or input device access on Linux Wayland. Use `--debug` for hotkey receipt and `--verbose` to distinguish missing events from a microphone startup wait. This fork re-enables macOS hotkey taps disabled by system timeout, while respecting user-requested disabling.
 
-### Model changed a number, code, URL or attachment
+### An older version reports changed numbers, terms or identifiers
 
-Result validation stopped the output; the raw transcript remains in the clipboard. Add the full standard name, such as `SOCKS5`, to the AI glossary. From `v0.1.7`, configured numbered terms can be restored and extra backticks around verifiable terms handled. Ordinary numbers, existing identifiers and code remain protected, with category-specific errors.
+Upgrade to `v0.1.10` or later, exit the old process and restart. Older versions required some original content to remain exact, potentially rejecting legitimate repairs to misrecognition. The model now judges these repairs from context, without mechanical checks on mention counts or identifier values. Response format and input target checks remain. Full standard names can help in the AI glossary, but every correctable word does not need to be listed.
 
 ### Overlay truncates text or never shows AI correction
 
@@ -303,7 +326,7 @@ The overlay has a two-line preview; full text is still pasted or copied. AI corr
 
 ### Where is my content sent
 
-Audio goes to Volcengine ASR. Only the Codex correction flow sends the transcript, selected conversation context, local hotwords and AI terms to the configured model service. The model key stays in local configuration and is used for request authentication, without being written to logs. ASR and correction use separate credentials.
+Audio goes to Volcengine ASR. Only the Codex correction flow sends the transcript, selected conversation context, local hotwords and AI terms to the configured model service. Learning also includes compact local references and confirmed previous raw/corrected/sent feedback. Full feedback is used in memory and that request; only extracted notes are stored locally. The model key stays in local configuration and is used for request authentication, without being written to logs. ASR and correction use separate credentials.
 
 ## Build and maintenance
 

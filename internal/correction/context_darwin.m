@@ -10,7 +10,7 @@ struct jt_correction_target {
     pid_t pid;
     AXUIElementRef app, editor, main, userAnchor;
     NSString *draft;
-    NSArray *messages;
+    NSArray *messages, *users, *userAnchors;
 };
 
 static void fail(char **error, NSString *message) { *error = strdup([message UTF8String]); }
@@ -66,17 +66,22 @@ static NSString *headingRole(NSArray *values, int depth, char **error) {
     return nil;
 }
 
-static void flushMessage(NSMutableArray *messages, NSString *role, NSMutableArray *parts) {
+static void flushMessage(NSMutableArray *messages, NSString *role, NSMutableArray *parts,
+                         AXUIElementRef userHeading, NSMutableArray *userAnchors) {
     if (role && parts.count) {
         [messages addObject:@{@"role":role,@"text":[parts componentsJoinedByString:@"\n"]}];
-        if (messages.count>100) [messages removeObjectAtIndex:0];
+        if ([role isEqual:@"user"]) [userAnchors addObject:(id)userHeading];
+        if (messages.count>100) {
+            if ([messages[0][@"role"] isEqual:@"user"]) [userAnchors removeObjectAtIndex:0];
+            [messages removeObjectAtIndex:0];
+        }
     }
     [parts removeAllObjects];
 }
 
 static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUInteger *count,
                  NSTimeInterval deadline, NSMutableArray *messages, NSMutableArray *parts,
-                 NSString **currentRole, AXUIElementRef *lastUserHeading, char **error) {
+                 NSString **currentRole, AXUIElementRef *lastUserHeading, NSMutableArray *userAnchors, char **error) {
     if (depth>=60 || ++(*count)>18000 || [NSDate timeIntervalSinceReferenceDate]>deadline) {
         fail(error,@"当前聊天读取超过 2 秒或结构过大，未使用不完整上下文"); return NO;
     }
@@ -87,22 +92,23 @@ static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUIn
     if ([role isEqualToString:@"AXHeading"]) {
         NSString *next=headingRole(values,0,error); if (*error) return NO;
         if (next) {
-            flushMessage(messages,*currentRole,parts); *currentRole=next;
+            flushMessage(messages,*currentRole,parts,*lastUserHeading,userAnchors); *currentRole=next;
             if ([next isEqualToString:@"user"]) *lastUserHeading=element;
             return YES;
         }
     }
     NSString *text=stringValue(values[1]);
     if (*currentRole && [role isEqualToString:@"AXStaticText"] && text.length) [parts addObject:text];
-    for (id child in children(values)) if (!scan((AXUIElementRef)child,editor,depth+1,count,deadline,messages,parts,currentRole,lastUserHeading,error)) return NO;
+    for (id child in children(values)) if (!scan((AXUIElementRef)child,editor,depth+1,count,deadline,messages,parts,currentRole,lastUserHeading,userAnchors,error)) return NO;
     return YES;
 }
 
-static NSArray *captureMessages(AXUIElementRef main, AXUIElementRef editor, AXUIElementRef *lastUserHeading, char **error) {
+static NSArray *captureMessages(AXUIElementRef main, AXUIElementRef editor, AXUIElementRef *lastUserHeading,
+                               NSMutableArray *userAnchors, char **error) {
     NSMutableArray *messages=[NSMutableArray array],*parts=[NSMutableArray array];
     NSUInteger count=0; NSString *role=nil;
-    if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,lastUserHeading,error)) return nil;
-    flushMessage(messages,role,parts);
+    if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,lastUserHeading,userAnchors,error)) return nil;
+    flushMessage(messages,role,parts,*lastUserHeading,userAnchors);
     if (!messages.count) { fail(error,@"当前 Codex 聊天没有提供消息角色与正文，未执行无上下文纠错"); return nil; }
     return messages;
 }
@@ -142,7 +148,8 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
             CFRelease(app); fail(error,@"请把光标放在 Codex 草稿框；未识别到同一聊天主区域"); return -1;
         }
         AXUIElementRef userAnchor=NULL;
-        NSArray *messages=captureMessages(main,editor,&userAnchor,error);
+        NSMutableArray *userAnchors=[NSMutableArray array];
+        NSArray *messages=captureMessages(main,editor,&userAnchor,userAnchors,error);
         if (!messages) { CFRelease(app); return -1; }
         if (!userAnchor) { CFRelease(app); fail(error,@"当前聊天没有提供用户消息锚点，无法绑定自动上屏目标"); return -1; }
         NSData *json=[NSJSONSerialization dataWithJSONObject:messages options:0 error:nil];
@@ -153,6 +160,8 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
         target->editor=(AXUIElementRef)CFRetain(editor); target->main=(AXUIElementRef)CFRetain(main);
         target->userAnchor=(AXUIElementRef)CFRetain(userAnchor);
         target->draft=[draft copy]; target->messages=[userMessages(messages) copy];
+        target->users=[[messages filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"role == 'user'"]] copy];
+        target->userAnchors=[userAnchors copy];
         *data=strdup([[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease].UTF8String);
         *out=target; return 1;
     }
@@ -171,7 +180,7 @@ int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **err
         AXUIElementRef main=mainAncestor(editor);
         if (!main || !CFEqual(main,target->main)) { fail(error,@"纠错期间切换了聊天，结果未上屏"); return 0; }
         AXUIElementRef userAnchor=NULL;
-        NSArray *messages=captureMessages(main,editor,&userAnchor,error);
+        NSArray *messages=captureMessages(main,editor,&userAnchor,nil,error);
         if (!messages) return 0;
         // 助手流式回复可继续增长；绑定用户消息的 AX 身份与正文，避免写入切换后的聊天。
         if (!userAnchor || !CFEqual(userAnchor,target->userAnchor) || ![userMessages(messages) isEqual:target->messages]) {
@@ -181,8 +190,27 @@ int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **err
     }
 }
 
+int jt_correction_submitted_after(jt_correction_target *current, jt_correction_target *previous, char **text) {
+    @autoreleasepool {
+        if (!current || !previous || current->pid!=previous->pid ||
+            !CFEqual(current->main,previous->main) || !CFEqual(current->editor,previous->editor)) return 0;
+        if (current->users.count!=current->userAnchors.count) return 0;
+        for (NSUInteger i=0;i<current->userAnchors.count;i++) {
+            if (!CFEqual((CFTypeRef)current->userAnchors[i],previous->userAnchor)) continue;
+            if (i+1>=current->users.count || i+1<previous->messages.count) return 0;
+            for (NSUInteger j=0;j<previous->messages.count;j++) {
+                if (![current->users[i+1-previous->messages.count+j] isEqual:previous->messages[j]]) return 0;
+            }
+            NSString *submitted=current->users[i+1][@"text"];
+            if (!submitted.length) return 0;
+            *text=strdup(submitted.UTF8String); return *text ? 1 : 0;
+        }
+        return 0;
+    }
+}
+
 void jt_correction_release(jt_correction_target *target) {
     if (!target) return;
     CFRelease(target->app); CFRelease(target->editor); CFRelease(target->main); CFRelease(target->userAnchor);
-    [target->draft release]; [target->messages release]; free(target);
+    [target->draft release]; [target->messages release]; [target->users release]; [target->userAnchors release]; free(target);
 }

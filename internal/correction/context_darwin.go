@@ -119,7 +119,22 @@ func capturePlatform() (*Target, error) {
 		C.jt_correction_release(native)
 		return nil, err
 	}
-	return &Target{Messages: messages, AvailableUsers: availableUsers, AvailableAssistants: availableAssistants, Close: func() { C.jt_correction_release(native) },
+	return &Target{Messages: messages, AvailableUsers: availableUsers, AvailableAssistants: availableAssistants, platform: native, Close: func() { C.jt_correction_release(native) },
+		SubmittedAfter: func(previous *Target) (string, bool) {
+			if previous == nil {
+				return "", false
+			}
+			prior, ok := previous.platform.(*C.jt_correction_target)
+			if !ok {
+				return "", false
+			}
+			var text *C.char
+			if C.jt_correction_submitted_after(native, prior, &text) != 1 || text == nil {
+				return "", false
+			}
+			defer C.free(unsafe.Pointer(text))
+			return C.GoString(text), true
+		},
 		Guard: func() error {
 			front, err := currentApplication()
 			if err != nil {

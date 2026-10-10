@@ -25,7 +25,7 @@ func TestDeepSeekCorrectionDisablesThinkingAndRequestsJSON(t *testing.T) {
 	cfg.BaseURL = server.URL
 	cfg.APIKey = "test-key"
 	cfg.Terms = []string{"ClawOps", "G01", "SOCKS5"}
-	result, err := Correct(context.Background(), cfg, "扣得克斯的 SOCKS 纠错。", []Message{{Role: "user", Text: "Codex"}}, []string{"Codex"})
+	result, err := Correct(context.Background(), cfg, "扣得克斯的 SOCKS 纠错。", []Message{{Role: "user", Text: "Codex"}}, []string{"Codex"}, nil)
 	if err != nil || result != "Codex 的 SOCKS5 纠错。" {
 		t.Fatal(err)
 	}

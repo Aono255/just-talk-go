@@ -41,6 +41,8 @@ func main() {
 	checkCodexContext := flag.Bool("check-codex-context", false, "wait 5 seconds, then check focused Codex context without recording or sending text")
 	installOnly := flag.Bool("install", false, "install just-talk for the current user")
 	focusHelper := flag.Bool("focus-helper", false, "internal: query frontmost application once")
+	showMemory := flag.Bool("show-correction-memory", false, "show locally learned correction references")
+	clearMemory := flag.Bool("clear-correction-memory", false, "clear locally learned correction references")
 	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
@@ -81,6 +83,27 @@ func main() {
 	}
 	if *versionOnly {
 		fmt.Printf("just-talk %s (%s)\n", version, commit)
+		return
+	}
+	if *showMemory || *clearMemory {
+		path := voice.CorrectionMemoryPath()
+		if *clearMemory {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintln(os.Stderr, "清空自学习记忆失败:", err)
+				os.Exit(1)
+			}
+			fmt.Println("已清空纠错自学习记忆；AI 术语、热词和配置保持原样。")
+			return
+		}
+		notes, err := correction.LoadMemory(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "读取自学习记忆失败:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("纠错自学习记忆 %d 条：\n", len(notes))
+		for i, note := range notes {
+			fmt.Printf("%d. %s\n", i+1, note)
+		}
 		return
 	}
 	if *installOnly {

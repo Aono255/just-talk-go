@@ -288,6 +288,8 @@ type VoicePlugin struct {
 	correctionCancels      map[uint64]context.CancelFunc
 	correctionCapture      func() (*correction.Target, error)
 	correctionClipboard    func(string) error
+	learningPending        *pendingLearning
+	learningStopped        bool
 	errorUntil             time.Time
 	errorTimer             *time.Timer
 	lastError              string
@@ -317,6 +319,7 @@ func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	p.env = env
 	p.logger = env.Logger()
 	p.cfg = env.Config()
+	p.learningStopped = false
 	loadTUIStats()
 	return p.registerFromConfig(env.Config())
 }
@@ -334,10 +337,16 @@ func (p *VoicePlugin) Start(ctx context.Context) error {
 func (p *VoicePlugin) Stop() error {
 	p.mu.Lock()
 	p.startCanceled = true
+	p.learningStopped = true
+	previous := p.learningPending
+	p.learningPending = nil
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
 	p.publishStatusLocked()
 	p.mu.Unlock()
+	if previous != nil {
+		previous.target.Close()
+	}
 	p.finishRecordingSession(session)
 	return nil
 }
@@ -347,7 +356,15 @@ func (p *VoicePlugin) OnConfigReload(cfg *config.Config) error { return p.regist
 func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	p.mu.Lock()
 	p.cfg = cfg
+	var previous *pendingLearning
+	if !cfg.Correction.Enabled || !cfg.Correction.Learning {
+		previous = p.learningPending
+		p.learningPending = nil
+	}
 	p.mu.Unlock()
+	if previous != nil {
+		previous.target.Close()
+	}
 	vc := cfg.Voice
 	if !vc.Enabled {
 		p.mu.Lock()
