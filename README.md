@@ -212,7 +212,12 @@ push_to_talk = "Alt+Super"
 ```toml
 [voice]
 hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+boosting_table_id = "" # 火山自学习平台的热词表 ID；留空使用上面的热词
 ```
+
+需要在云端维护较大词表时，进入火山控制台的“豆包语音 → 自学习平台 → 热词管理”，选择与 JustTalk App Key 对应的应用，创建热词文件并复制 ID。在 TUI 的“火山热词表 ID”中填入并保存，下一次录音会把 ID 发送到识别请求的 `request.corpus.boosting_table_id`。上传文件为 UTF-8 TXT，每行一个词；词表格式与限制见[官方热词管理说明](https://www.volcengine.com/docs/6561/155739?lang=zh)。
+
+填写 ID 后，识别使用云端词表，不发送本地直传热词；清空 ID 后使用本地热词。这样避免官方接口中直传热词优先于云端词表的规则影响所选词表。本地热词仍作为 AI 纠错的补充词汇。“AI 纠错术语”仅供纠错模型参考，与火山词表分别维护。创建云端词表本身不会自动绑定 JustTalk，需在客户端保存对应 ID。
 
 macOS 热键写法：
 

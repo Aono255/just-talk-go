@@ -212,7 +212,12 @@ Hotword example:
 ```toml
 [voice]
 hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+boosting_table_id = "" # Cloud hotword table ID; leave empty to use the inline hotwords above
 ```
+
+To maintain a larger cloud vocabulary, open Doubao Voice → Self-learning Platform → Hotword Management in the Volcengine console, select the application matching JustTalk’s App Key, create a table and copy its ID. Enter it in “火山热词表 ID” in the TUI and save. The next recording sends it as `request.corpus.boosting_table_id`. Upload UTF-8 TXT with one word per line; see the [official table-management instructions](https://www.volcengine.com/docs/6561/155739?lang=zh) for format and limits.
+
+When an ID is configured, recognition uses the cloud table and does not send inline hotwords, which have higher priority in the service API. Clearing the ID restores inline hotwords. Local hotwords remain supplementary vocabulary for AI correction. The independent “AI 纠错术语” glossary is maintained separately and is sent only to the correction model. Creating a cloud table does not automatically bind it to JustTalk; save its ID in the client.
 
 macOS hotkey example:
 

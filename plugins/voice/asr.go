@@ -14,11 +14,12 @@ import (
 )
 
 type ASRConfig struct {
-	AppKey     string
-	AccessKey  string
-	ResourceID string
-	Language   string
-	Hotwords   []string
+	AppKey          string
+	AccessKey       string
+	ResourceID      string
+	Language        string
+	Hotwords        []string
+	BoostingTableID string
 }
 
 type ASRClient struct {
@@ -145,7 +146,9 @@ func (c *ASRClient) sendFullClientRequest(ctx context.Context) error {
 		"enable_ddc": false, "enable_word": false,
 		"enable_nonstream": true, "result_type": "full", "show_utterances": true,
 	}
-	if len(c.cfg.Hotwords) > 0 {
+	if tableID := strings.TrimSpace(c.cfg.BoostingTableID); tableID != "" {
+		request["corpus"] = map[string]interface{}{"boosting_table_id": tableID}
+	} else if len(c.cfg.Hotwords) > 0 {
 		if contextJSON, err := hotwordsContext(c.cfg.Hotwords); err == nil && contextJSON != "" {
 			request["corpus"] = map[string]interface{}{"context": contextJSON}
 		}

@@ -80,6 +80,7 @@ func New(cfg *config.Config) *Model {
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+		{label: "火山热词表 ID", key: "boosting_table_id", help: "填写后识别使用云端词表；留空使用热词", fType: fString, input: ti(vc.BoostingTableID)},
 		{label: "Codex 纠错", key: "correction_enabled", help: "macOS：结合当前聊天整理识别文字，再上屏", fType: fToggle, boolVal: cc.Enabled},
 		{label: "AI 纠错术语", key: "correction_terms", help: "逗号分隔；仅供纠错模型参考，不传给语音识别", fType: fString, input: ti(strings.Join(cc.Terms, ", "))},
 		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
@@ -248,6 +249,8 @@ func (m *Model) save() {
 			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 		case "hotwords":
 			vc.Hotwords = splitList(f.input.Value())
+		case "boosting_table_id":
+			vc.BoostingTableID = strings.TrimSpace(f.input.Value())
 		case "correction_enabled":
 			next.Correction.Enabled = f.boolVal
 		case "correction_terms":
