@@ -17,16 +17,16 @@ func TestDeepSeekCorrectionDisablesThinkingAndRequestsJSON(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
-		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"corrected_text":"Codex 纠错。"}`}, "finish_reason": "stop"}}})
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"corrected_text":"Codex 的 SOCKS5 纠错。"}`}, "finish_reason": "stop"}}})
 	}))
 	defer server.Close()
 	cfg := config.Default().Correction
 	cfg.Enabled = true
 	cfg.BaseURL = server.URL
 	cfg.APIKey = "test-key"
-	cfg.Terms = []string{"ClawOps", "G01", "关基智能体"}
-	_, err := Correct(context.Background(), cfg, "扣得克斯纠错。", []Message{{Role: "user", Text: "Codex"}}, []string{"Codex"})
-	if err != nil {
+	cfg.Terms = []string{"ClawOps", "G01", "SOCKS5"}
+	result, err := Correct(context.Background(), cfg, "扣得克斯的 SOCKS 纠错。", []Message{{Role: "user", Text: "Codex"}}, []string{"Codex"})
+	if err != nil || result != "Codex 的 SOCKS5 纠错。" {
 		t.Fatal(err)
 	}
 	if string(request["thinking"]) != `{"type":"disabled"}` || string(request["response_format"]) != `{"type":"json_object"}` || string(request["temperature"]) != "0" || string(request["model"]) != `"deepseek-flash"` {

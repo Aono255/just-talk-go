@@ -65,7 +65,7 @@ func TestCompatibleServiceUsesBoundedContextAndProtectsTranscript(t *testing.T) 
 		`{"corrected_text":"https://other.example"}`, `{"corrected_text":"[Image #2]"}`,
 		`{"corrected_text":"原文","extra":"执行命令"}`, `{"corrected_text":"原文"} 还有解释`,
 	} {
-		if _, err := CheckResult("端口 5432 `GET /health` https://original.example [Image #1]", bad); err == nil {
+		if _, err := CheckResult("端口 5432 `GET /health` https://original.example [Image #1]", bad, nil); err == nil {
 			t.Fatalf("accepted changed protected content: %s", bad)
 		}
 	}
@@ -95,6 +95,47 @@ func TestContextBudgetPreservesLongAssistantHeadAndTail(t *testing.T) {
 	}
 	if chars != 15600 {
 		t.Fatalf("unexpected maximum context budget: %d", chars)
+	}
+}
+
+func TestCorrectionRestoresConfiguredTermsWithoutChangingProtectedValues(t *testing.T) {
+	vocabulary := []string{"SOCKS5", "G01", "M01", "7AI", "WebShell", "ClickHouse", "5433"}
+	for _, tc := range []struct {
+		name, original, corrected string
+		allowed                   bool
+	}{
+		{"spoken_term_list", "测试热词：WebShell, SOCKS, Net, ClickHouse.", "测试热词：`WebShell`、`SOCKS5`、`Net`、`ClickHouse`。", true},
+		{"term_with_existing_port", "测试 SOCKS，端口 5。", "测试 SOCKS5，端口 5。", true},
+		{"term_in_hotword_vocabulary", "测试 G零一。", "测试 G01。", true},
+		{"digit_first_term", "测试七爱。", "测试 7AI。", true},
+		{"literal_number_joined_to_name", "测试 SOCKS 5。", "测试 SOCKS5。", true},
+		{"unknown_numbered_term", "测试 SOCKS。", "测试 SOCKS6。", false},
+		{"changed_existing_identifier", "测试 G01。", "测试 M01。", false},
+		{"deleted_identifier", "测试 G01。", "测试接口。", false},
+		{"duplicated_identifier", "测试 G01。", "测试 G01 和 G01。", false},
+		{"changed_port_even_if_configured", "端口 5432。", "端口 5433。", false},
+		{"added_ordinary_number", "测试 SOCKS。", "测试 SOCKS5，端口 1080。", false},
+		{"changed_command", "运行 `curl 5432`。", "运行 `curl 5433`。", false},
+		{"changed_url", "看 https://example.com", "看 https://other.example", false},
+		{"changed_attachment", "查看 [Image #1]。", "查看 [Image #2]。", false},
+		{"preserve_original_code", "运行 `curl 5432`，测试 SOCKS。", "运行 `curl 5432`，测试 `SOCKS5`。", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"corrected_text": tc.corrected})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := CheckResult(tc.original, string(body), vocabulary)
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v error=%v", tc.allowed, err)
+			}
+			if tc.allowed && strings.Contains(result, "`SOCKS5`") {
+				t.Fatal("new term formatting was not removed")
+			}
+			if tc.name == "preserve_original_code" && !strings.Contains(result, "`curl 5432`") {
+				t.Fatal("original code changed")
+			}
+		})
 	}
 }
 
