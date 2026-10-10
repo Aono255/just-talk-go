@@ -1,6 +1,9 @@
 package correction
 
-import "errors"
+import (
+	"errors"
+	"io"
+)
 
 var ErrNotCodex = errors.New("当前应用不是 Codex")
 
@@ -14,3 +17,6 @@ type Target struct {
 }
 
 func Capture() (*Target, error) { return capturePlatform() }
+
+// RunFocusHelper writes application identity once, before configuration or plugins are loaded.
+func RunFocusHelper(output io.Writer) error { return focusHelperPlatform(output) }

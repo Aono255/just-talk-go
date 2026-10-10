@@ -40,10 +40,18 @@ func main() {
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
 	checkCodexContext := flag.Bool("check-codex-context", false, "wait 5 seconds, then check focused Codex context without recording or sending text")
 	installOnly := flag.Bool("install", false, "install just-talk for the current user")
+	focusHelper := flag.Bool("focus-helper", false, "internal: query frontmost application once")
 	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
 	flag.Parse()
+	if *focusHelper {
+		if err := correction.RunFocusHelper(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "input application helper: %s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *checkCodexContext {
 		fmt.Println("请在 5 秒内回到 Codex 当前聊天，并把光标放在草稿框。仅检查上下文，不录音、不访问模型服务、不保存消息正文。")
 		time.Sleep(5 * time.Second)

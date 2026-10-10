@@ -26,20 +26,16 @@ static AXUIElementRef focused(AXUIElementRef app) {
     return value && CFGetTypeID((CFTypeRef)value) == AXUIElementGetTypeID() ? (AXUIElementRef)value : NULL;
 }
 
-// Go 主进程没有 AppKit 主事件循环；直接查询系统焦点，避免 NSWorkspace 保留旧前台应用。
-static AXUIElementRef focusedApplication(pid_t *pid, char **error) {
-    AXUIElementRef system=AXUIElementCreateSystemWide();
-    AXUIElementSetMessagingTimeout(system,0.2);
-    CFTypeRef value=NULL;
-    AXError status=AXUIElementCopyAttributeValue(system,kAXFocusedApplicationAttribute,&value);
-    CFRelease(system);
-    if (status!=kAXErrorSuccess || !value || CFGetTypeID(value)!=AXUIElementGetTypeID() ||
-        AXUIElementGetPid((AXUIElementRef)value,pid)!=kAXErrorSuccess || *pid<=0) {
-        if (value) CFRelease(value);
-        fail(error,@"无法确认当前输入应用，未执行纠错或自动上屏"); return NULL;
+// 仅由独立的单次助手进程调用；主进程不依赖 AppKit 的前台应用缓存。
+int jt_correction_frontmost(pid_t *pid, char **bundle, char **error) {
+    @autoreleasepool {
+        NSRunningApplication *front=[[NSWorkspace sharedWorkspace] frontmostApplication];
+        if (!front || front.processIdentifier<=0 || !front.bundleIdentifier.length) {
+            fail(error,@"无法确认当前输入应用身份，未执行纠错或自动上屏"); return 0;
+        }
+        *pid=front.processIdentifier; *bundle=strdup(front.bundleIdentifier.UTF8String);
+        return 1;
     }
-    AXUIElementSetMessagingTimeout((AXUIElementRef)value,0.2);
-    return (AXUIElementRef)value;
 }
 
 static NSString *messageRole(NSString *heading) {
@@ -127,16 +123,19 @@ static AXUIElementRef mainAncestor(AXUIElementRef editor) {
     return NULL;
 }
 
-int jt_correction_capture(jt_correction_target **out, char **data, char **error) {
+int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, char **error) {
     @autoreleasepool {
         if (!AXIsProcessTrusted()) { fail(error,@"请给启动 JustTalk 的终端辅助功能权限，才能确认当前输入应用"); return -1; }
-        pid_t pid=0;
-        AXUIElementRef app=focusedApplication(&pid,error); if (!app) return -1;
+        if (pid<=0) { fail(error,@"当前输入应用 PID 无效"); return -1; }
         NSRunningApplication *front=[NSRunningApplication runningApplicationWithProcessIdentifier:pid];
         if (!front.bundleIdentifier.length) {
-            CFRelease(app); fail(error,@"无法确认当前输入应用身份，未执行纠错或自动上屏"); return -1;
+            fail(error,@"无法确认当前输入应用身份，未执行纠错或自动上屏"); return -1;
         }
-        if (![front.bundleIdentifier isEqualToString:@"com.openai.codex"]) { CFRelease(app); return 0; }
+        if (![front.bundleIdentifier isEqualToString:@"com.openai.codex"]) return 0;
+        AXUIElementRef system=AXUIElementCreateSystemWide();
+        AXUIElementSetMessagingTimeout(system,0.2); CFRelease(system);
+        AXUIElementRef app=AXUIElementCreateApplication(pid);
+        AXUIElementSetMessagingTimeout(app,0.2);
         AXUIElementRef editor=focused(app),main=editor?mainAncestor(editor):NULL;
         NSString *draft=editor?attribute(editor,kAXValueAttribute):nil;
         if (!editor || ![attribute(editor,kAXRoleAttribute) isEqual:@"AXTextArea"] || ![draft isKindOfClass:[NSString class]] || !main) {
@@ -159,13 +158,11 @@ int jt_correction_capture(jt_correction_target **out, char **data, char **error)
     }
 }
 
-int jt_correction_guard(jt_correction_target *target, char **error) {
+int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **error) {
     @autoreleasepool {
-        pid_t pid=0;
-        AXUIElementRef app=focusedApplication(&pid,error); if (!app) return 0;
-        AXUIElementRef editor=pid==target->pid?focused(app):NULL;
-        CFRelease(app);
-        if (pid!=target->pid || !editor || !CFEqual(editor,target->editor)) {
+        if (frontPid!=target->pid) { fail(error,@"纠错期间切换了应用，结果未上屏"); return 0; }
+        AXUIElementRef editor=focused(target->app);
+        if (!editor || !CFEqual(editor,target->editor)) {
             fail(error,@"纠错期间切换了应用或输入框，结果未上屏"); return 0;
         }
         if (![attribute(editor,kAXValueAttribute) isEqual:target->draft]) {

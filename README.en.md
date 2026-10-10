@@ -279,7 +279,9 @@ Logs are `/tmp/just-talk.log` on Linux/macOS and `%LOCALAPPDATA%\just-talk\just-
 
 ### DeepSeek enabled, but WeChat asks for a Codex draft
 
-Confirm `just-talk --version` is at least `v0.1.8`, exit the old process, and restart. The updated implementation checks live system input focus, allowing ordinary voice input in other applications. If the error occurs inside Codex, focus the current conversation draft before recording.
+Confirm `just-talk --version` is at least `v0.1.9`, exit the old process, and restart. The updated implementation queries the current frontmost application in a one-shot helper process, allowing ordinary voice input in other applications. If the error occurs inside Codex, focus the current conversation draft before recording.
+
+The system-wide AX focus query used in `v0.1.8` returned `-25204` immediately on an authorized device even with a longer timeout, producing an application-detection failure. From `v0.1.9`, a separate process queries AppKit application identity without reading configuration, conversation text or microphone input. Helper failure or a 2-second timeout still prevents paste. The main process retains Codex input/chat binding checks and rechecks application identity before paste. Failures are logged to distinguish application detection from conversation access problems.
 
 ### Stuck at “准备中” or the older CON label
 

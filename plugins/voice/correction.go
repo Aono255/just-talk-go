@@ -142,6 +142,7 @@ func (p *VoicePlugin) correctionFailed(sessionID uint64, err error) {
 	if !p.correctionSessionCurrent(sessionID) {
 		return
 	}
+	p.logger.Warn("correction or paste failed", "session_id", sessionID, "error", err)
 	pout("❌ 纠错或上屏未完成: %s；原始识别已复制", err)
 	p.publishError("纠错未上屏: "+shortError(err)+"；可粘贴原始识别", sessionID)
 }
