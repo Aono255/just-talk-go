@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,57 @@ import (
 	"github.com/c/just-talk-go/hotkey"
 	"github.com/c/just-talk-go/internal/correction"
 )
+
+func TestCorrectionRoutingKeepsOtherAppsUsableAndReportsCodexFocusErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		captureErr error
+		wantError  bool
+	}{
+		{"other_app", correction.ErrNotCodex, false},
+		{"codex_without_draft", errors.New("请把光标放在 Codex 草稿框；未识别到同一聊天主区域"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer server.Close()
+			cfg := config.Default()
+			cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
+			eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			p := NewVoicePlugin()
+			if err := eng.LoadPlugin(p); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(eng.Stop)
+			p.sessionID = 7
+			p.correctionCapture = func() (*correction.Target, error) { return nil, tc.captureErr }
+			copied := make(chan string, 1)
+			p.correctionClipboard = func(text string) error { copied <- text; return nil }
+			p.outputTranscript(&recordingSession{sessionID: 7, correction: cfg.Correction}, "普通语音输入。")
+			select {
+			case text := <-copied:
+				if text != "普通语音输入。" {
+					t.Fatalf("raw transcript changed: %q", text)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("raw transcript was not copied")
+			}
+			if requests.Load() != 0 {
+				t.Fatal("model was called without a Codex draft")
+			}
+			p.mu.Lock()
+			hasError := p.lastError != ""
+			p.mu.Unlock()
+			if hasError != tc.wantError {
+				t.Fatalf("error=%v want=%v", hasError, tc.wantError)
+			}
+		})
+	}
+}
 
 func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T) {
 	for _, mode := range []string{"success", "changed", "error", "cancel"} {

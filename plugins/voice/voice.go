@@ -936,7 +936,7 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 		}
 
 		p.logger.Debug("text output: writing clipboard", "text_len", len(text))
-		if err := writeClipboard(text); err != nil {
+		if err := p.copyTranscriptText(text); err != nil {
 			pout("❌ 复制到剪贴板失败: %v", err)
 		} else {
 			pout("📋 已复制到剪贴板")

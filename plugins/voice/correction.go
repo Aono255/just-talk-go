@@ -17,7 +17,7 @@ func (p *VoicePlugin) correctionSessionCurrent(sessionID uint64) bool {
 	return !canceled && p.sessionID == sessionID && p.env.Engine().Context().Err() == nil
 }
 
-func (p *VoicePlugin) copyCorrectionText(text string) error {
+func (p *VoicePlugin) copyTranscriptText(text string) error {
 	if p.correctionClipboard != nil {
 		return p.correctionClipboard(text)
 	}
@@ -49,7 +49,7 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 		return
 	}
 	// 模型错误、超时或焦点改变时，识别原文仍可从剪贴板取回。
-	if copyErr := p.copyCorrectionText(text); copyErr != nil {
+	if copyErr := p.copyTranscriptText(text); copyErr != nil {
 		p.publishError("识别原文复制失败，未调用纠错服务", session.sessionID)
 		return
 	}
@@ -114,12 +114,12 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 	} else {
 		err = guard()
 		if err == nil {
-			err = p.copyCorrectionText(corrected)
+			err = p.copyTranscriptText(corrected)
 		}
 	}
 	if err != nil {
 		if p.correctionSessionCurrent(session.sessionID) {
-			if restoreErr := p.copyCorrectionText(text); restoreErr != nil {
+			if restoreErr := p.copyTranscriptText(text); restoreErr != nil {
 				p.publishError("纠错未上屏，识别原文复制失败", session.sessionID)
 				return
 			}
