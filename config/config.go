@@ -20,12 +20,13 @@ type Config struct {
 }
 
 type CorrectionConfig struct {
-	Provider  string `toml:"provider"`
-	Enabled   bool   `toml:"enabled"`
-	BaseURL   string `toml:"base_url"`
-	Model     string `toml:"model"`
-	APIKey    string `toml:"api_key"`
-	TimeoutMS int    `toml:"timeout_ms"`
+	Provider  string   `toml:"provider"`
+	Enabled   bool     `toml:"enabled"`
+	BaseURL   string   `toml:"base_url"`
+	Model     string   `toml:"model"`
+	APIKey    string   `toml:"api_key"`
+	TimeoutMS int      `toml:"timeout_ms"`
+	Terms     []string `toml:"terms"`
 }
 
 type DebugConfig struct {

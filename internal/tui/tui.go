@@ -81,6 +81,7 @@ func New(cfg *config.Config) *Model {
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 		{label: "Codex 纠错", key: "correction_enabled", help: "macOS：结合当前聊天整理识别文字，再上屏", fType: fToggle, boolVal: cc.Enabled},
+		{label: "AI 纠错术语", key: "correction_terms", help: "逗号分隔；仅供纠错模型参考，不传给语音识别", fType: fString, input: ti(strings.Join(cc.Terms, ", "))},
 		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
 		{label: "模型服务地址", key: "correction_base_url", help: "OpenAI 兼容 Base URL，通常含 /v1", fType: fString, input: ti(cc.BaseURL)},
 		{label: "纠错模型", key: "correction_model", help: "服务商提供的模型名；优先使用快速非思考模型", fType: fString, input: ti(cc.Model)},
@@ -249,6 +250,8 @@ func (m *Model) save() {
 			vc.Hotwords = splitList(f.input.Value())
 		case "correction_enabled":
 			next.Correction.Enabled = f.boolVal
+		case "correction_terms":
+			next.Correction.Terms = splitList(f.input.Value())
 		case "correction_provider":
 			next.Correction.Provider = f.opts[f.optIdx]
 		case "correction_base_url":

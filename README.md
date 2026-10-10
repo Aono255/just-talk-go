@@ -233,6 +233,8 @@ macOS 浮层的波形音量来自原有录音流，不额外采集麦克风或�
 
 在 TUI 中用 `j/k` 导航至“Codex 纠错”，填写服务地址、模型名和 API Key，再启用并按 `s` 保存。配置列表随光标滚动；API Key 在查看和编辑时均隐藏。服务必须兼容 OpenAI `POST /chat/completions`，以 Bearer Key 认证，并返回 `choices[].message.content`。默认预填 DeepSeek 的地址与 `deepseek-flash`，显式关闭思考并启用 JSON 输出；API Key 留空。选择 `openai-compatible` 可使用其他兼容服务，填写对应地址和模型，不自动切换模型。DeepSeek 当前参数见[官方文档](https://api-docs.deepseek.com/api/create-chat-completion/)。
 
+“AI 纠错术语”是独立词表，可填写较完整的项目名、技术词和缩写，在 TUI 中以中英文逗号分隔；它只发送给纠错模型，不传给语音识别。“热词”仍用于识别，并作为补充词汇发送给纠错模型。AI 术语默认留空，不限制为语音识别的热词预算，但会占用模型输入长度，可能影响耗时与费用。保存后在下一次录音生效，已开始录音使用当时的词表。
+
 ```toml
 [correction]
 enabled = false
@@ -241,6 +243,7 @@ base_url = "https://api.deepseek.com"
 model = "deepseek-flash"
 api_key = ""                           # 在本地填写
 timeout_ms = 8000
+terms = ["ClawOps", "ReadModel", "两高一弱"] # 独立的 AI 纠错术语
 ```
 
 上下文只从当前 Codex 草稿框所属的聊天主区域读取，按消息角色取已载入的最近六条用户消息和三条助手回复。每条用户消息最多 1200 字符，每条助手回复最多 2800 字符，总计最多 15600 字符；过长消息保留首尾并标注省略，按原对话顺序发送。只发送这些上下文、本次识别文字及配置的热词。TUI 显示实际发送的条数与字符数，日志另外记录已载入的消息数量，不保存上下文正文。没有读取到消息角色与正文时明确失败，不使用最近活跃的其他聊天。虚拟列表尚未载入的历史无法通过此方式读取。需给启动 JustTalk 的终端辅助功能权限。

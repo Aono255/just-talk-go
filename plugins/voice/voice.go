@@ -579,6 +579,7 @@ func (p *VoicePlugin) startRecording() {
 	p.sessionID++
 	p.sessionGen++
 	p.sessionCorrection = p.cfg.Correction
+	p.sessionCorrection.Terms = append([]string(nil), p.cfg.Correction.Terms...)
 	p.sessionHotwords = append([]string(nil), asrCfg.Hotwords...)
 	for _, cancel := range p.correctionCancels {
 		cancel()

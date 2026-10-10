@@ -233,6 +233,8 @@ The macOS waveform uses the existing recording stream and does not open another 
 
 Use `j/k` in the TUI to reach the correction settings, enter the provider Base URL, model name and API key, enable correction, then press `s`. The list scrolls with the cursor. The API key is masked both when viewing and editing. Providers must support OpenAI-compatible `POST /chat/completions`, Bearer authentication and `choices[].message.content`. The defaults prefill DeepSeek’s Base URL and `deepseek-flash`, explicitly disable thinking and enable JSON output; the API key remains empty. Select `openai-compatible` for another compatible service, and supply its own URL/model. No model switching occurs. See the [DeepSeek API reference](https://api-docs.deepseek.com/api/create-chat-completion/).
 
+“AI 纠错术语” provides an independent glossary of project names, technical terms and abbreviations, separated by English or Chinese commas in the TUI. It is sent only to the correction model, while the existing ASR hotwords also remain available as supplementary correction vocabulary. The glossary defaults to empty and is independent of the ASR hotword budget; it still consumes model input and can affect latency and cost. Saved changes apply to the next recording; recordings already started keep their captured glossary.
+
 ```toml
 [correction]
 enabled = false
@@ -241,6 +243,7 @@ base_url = "https://api.deepseek.com"
 model = "deepseek-flash"
 api_key = ""                           # Enter locally
 timeout_ms = 8000
+terms = ["ClawOps", "ReadModel", "两高一弱"] # Independent AI correction glossary
 ```
 
 Context comes only from the conversation main region containing the focused Codex draft. The latest six loaded user messages and three loaded assistant replies are selected by their accessible role headings. Each user message is limited to 1,200 characters and each assistant reply to 2,800, with a total limit of 15,600. Long messages retain their beginning and end with an omission marker; the original conversation order is preserved. Only these messages, the current ASR transcript and configured hotwords are sent. The TUI shows actual sent message and character counts; logs also report the loaded message counts without recording context text. Missing context fails explicitly; unrelated recently active chats are never substituted. History not loaded into the virtualized view is unavailable. Grant Accessibility to the terminal that launches JustTalk.

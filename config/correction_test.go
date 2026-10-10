@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -24,11 +25,12 @@ func TestExplicitConfigSaveKeepsPathAndPrivatePermissions(t *testing.T) {
 		t.Fatal("correction should be disabled with an 8-second timeout")
 	}
 	cfg.Correction.Model = "new-model"
+	cfg.Correction.Terms = []string{"ClawOps", "两高一弱"}
 	if err := Save(cfg); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := Load(path)
-	if err != nil || loaded.Correction.Model != "new-model" {
+	if err != nil || loaded.Correction.Model != "new-model" || !reflect.DeepEqual(loaded.Correction.Terms, cfg.Correction.Terms) {
 		t.Fatalf("wrong save target: %v", err)
 	}
 	other, err := Load("config.toml")

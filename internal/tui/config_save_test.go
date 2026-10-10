@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -17,10 +18,14 @@ func TestSavePassesNewCredentialsToReload(t *testing.T) {
 	}
 	original := config.Default()
 	original.Voice.AccessKey = "old-token"
+	original.Voice.Hotwords = []string{"Codex"}
 	model := New(original)
 	for i := range model.fields {
 		if model.fields[i].key == "access_key" {
 			model.fields[i].input.SetValue("new-token")
+		}
+		if model.fields[i].key == "correction_terms" {
+			model.fields[i].input.SetValue("ClawOps, 两高一弱，G01, ClawOps")
 		}
 	}
 	var reloaded *config.Config
@@ -39,32 +44,39 @@ func TestSavePassesNewCredentialsToReload(t *testing.T) {
 	if saved.Voice.AccessKey != "new-token" {
 		t.Fatal("saving did not persist the new credentials")
 	}
+	expected := []string{"ClawOps", "两高一弱", "G01"}
+	if !reflect.DeepEqual(saved.Correction.Terms, expected) || !reflect.DeepEqual(reloaded.Correction.Terms, expected) || !reflect.DeepEqual(saved.Voice.Hotwords, original.Voice.Hotwords) {
+		t.Fatal("AI terms were not saved/reloaded independently from ASR hotwords")
+	}
 }
 
 func TestCorrectionKeyIsMaskedAndConfigurationViewportFits(t *testing.T) {
 	cfg := config.Default()
 	cfg.Correction.APIKey = "never-show-this-secret"
 	cfg.Correction.BaseURL = "https://example.invalid/v1"
+	cfg.Correction.Terms = []string{"ClawOps", strings.Repeat("术语", 100)}
 	model := New(cfg)
 	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	for i, f := range model.fields {
-		if f.key == "correction_api_key" {
-			model.cursor = i
-		}
-	}
-	for _, editing := range []bool{false, true} {
-		model.editing = editing
-		view := model.View()
-		if strings.Contains(view, cfg.Correction.APIKey) || !strings.Contains(view, "模型 API Key") {
-			t.Fatal("API key leaked or editing row is invisible")
-		}
-		for _, line := range strings.Split(view, "\n") {
-			if ansi.StringWidth(line) > 80 {
-				t.Fatalf("field wrapped outside terminal: %q", line)
+	for _, key := range []string{"correction_api_key", "correction_terms"} {
+		for i, f := range model.fields {
+			if f.key == key {
+				model.cursor = i
 			}
 		}
-		if strings.Count(view, "\n")+1 > 24 {
-			t.Fatal("configuration pushes recording status outside a 24-row terminal")
+		for _, editing := range []bool{false, true} {
+			model.editing = editing
+			view := model.View()
+			if strings.Contains(view, cfg.Correction.APIKey) || !strings.Contains(view, model.fields[model.cursor].label) {
+				t.Fatal("API key leaked or editing row is invisible")
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if ansi.StringWidth(line) > 80 {
+					t.Fatalf("field wrapped outside terminal: %q", line)
+				}
+			}
+			if strings.Count(view, "\n")+1 > 24 {
+				t.Fatal("configuration pushes recording status outside a 24-row terminal")
+			}
 		}
 	}
 }
