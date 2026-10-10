@@ -63,6 +63,13 @@ func (b *darwinBackend) Hide() error {
 	return b.send(helperCommand{Cmd: "hide"})
 }
 
+func updateAudioLevel(b backend, level float64) error {
+	if native, ok := b.(*darwinBackend); ok {
+		return native.send(helperCommand{Cmd: "level", Level: level})
+	}
+	return nil
+}
+
 func (b *darwinBackend) Close() error {
 	b.mu.Lock()
 	stdin := b.stdin

@@ -30,6 +30,7 @@ type Plugin struct {
 	lastLabel   string
 	lastText    string
 	lastVisible bool
+	lastLevel   float64
 }
 
 func NewOverlayPlugin() *Plugin { return &Plugin{} }
@@ -78,6 +79,16 @@ func (p *Plugin) Stop() error {
 func (p *Plugin) sync(status voice.TUIVoiceStatus) {
 	label, color, visible := displayForStatus(status, p.cfg.IdleVisible)
 	text := status.Transcript
+	if status.State == "error" && status.Detail != "" {
+		text = status.Detail
+	}
+	if status.AudioLevel != p.lastLevel {
+		if err := updateAudioLevel(p.backend, status.AudioLevel); err != nil {
+			p.logger.Debug("overlay meter failed", "error", err)
+		} else {
+			p.lastLevel = status.AudioLevel
+		}
+	}
 	if status.State == "idle" && !status.TranscriptUntil.After(time.Now()) {
 		text = ""
 	}
@@ -113,6 +124,8 @@ func displayForStatus(status voice.TUIVoiceStatus, idleVisible bool) (string, st
 		return "STP", statusColor{R: 255 << 8, G: 140 << 8, B: 60 << 8}, true
 	case "stopping":
 		return "WAI", statusColor{R: 255 << 8, G: 160 << 8, B: 70 << 8}, true
+	case "correcting":
+		return "FIX", statusColor{R: 125 << 8, G: 170 << 8, B: 255 << 8}, true
 	case "error":
 		return "ERR", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	default:

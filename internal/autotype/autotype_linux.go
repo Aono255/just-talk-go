@@ -52,7 +52,12 @@ func isWaylandSession() bool {
 	return os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
 }
 
-func pastePlatform(text string, logger *slog.Logger) error {
+func pastePlatform(text string, logger *slog.Logger, guard func() error) error {
+	if guard != nil {
+		if err := guard(); err != nil {
+			return err
+		}
+	}
 	if isWaylandSession() {
 		return pasteWayland(text, logger)
 	}

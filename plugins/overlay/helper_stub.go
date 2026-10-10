@@ -10,3 +10,5 @@ import (
 func RunHelper(position string, scale float64, input io.Reader) error {
 	return fmt.Errorf("overlay helper is only available on macOS")
 }
+
+func updateAudioLevel(b backend, level float64) error { return nil }

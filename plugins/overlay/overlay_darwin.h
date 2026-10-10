@@ -10,3 +10,4 @@ void jt_overlay_run_helper(const char *position, double scale);
 void jt_overlay_helper_show(const char *label, const char *text, unsigned short r, unsigned short g, unsigned short b);
 void jt_overlay_helper_hide(void);
 void jt_overlay_helper_close(void);
+void jt_overlay_helper_level(double level);

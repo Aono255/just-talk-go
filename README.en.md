@@ -21,7 +21,7 @@ This [fork maintained by Aono255](https://github.com/Aono255/just-talk-go) is ba
 - Doubao streaming ASR with optimized bidirectional streaming and second-pass recognition.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
-- The macOS overlay previews recognition text and keeps the final result visible for 3 seconds. Long previews show the latest 100 characters while the complete result is pasted normally. The `notch` position sits at the top center below the menu bar, including on external displays without a notch.
+- The macOS overlay uses Chinese status labels, an audio-level waveform and an AI correction animation, keeping the final result visible for 3 seconds. Recording, recognition, correction and completion share the same expanded 448×104-point size, adjusted by the configured scale. The AI stage does not enlarge the overlay. Long transcripts retain the latest text that fits in a fixed two-line preview; the complete result is pasted normally. The `notch` position sits at the top center below the menu bar, including on external displays without a notch.
 - TUI configuration for hotkeys, mode, auto-submit, stop delay, hotwords, and related settings.
 - ASR hotwords for project names, people names, English terms, and domain-specific vocabulary.
 - Usage statistics for total sessions, total recognized characters, average speed, and recent speed.
@@ -224,6 +224,34 @@ push_to_talk = "Option+Command"
 
 On Windows, `Win` and `Super` both refer to the Windows logo key. If recording is unavailable, allow desktop applications to access the microphone under Windows Settings > Privacy & security > Microphone.
 
+
+## Codex context correction (macOS)
+
+The optional, disabled-by-default correction step reuses the recording hotkey: finish ASR → read the current Codex conversation → correct/organize with the configured model → paste. The macOS overlay displays “AI 整理中” and a context-correction badge with a blue-purple animation inside the container. Completion displays the corrected result and highlights the visible changed region. Other applications keep their ordinary voice-input behavior.
+
+The macOS waveform uses the existing recording stream and does not open another microphone or system-audio capture. Animations run in the separate AppKit helper, outside hotkey callbacks. The overlay does not take focus or receive mouse input, stops its timer when hidden, and respects the system Reduce Motion setting. Preparation and idle use a small capsule; recording expands it, after which recognition, correction and completion retain the same dimensions and text position.
+
+Use `j/k` in the TUI to reach the correction settings, enter the provider Base URL, model name and API key, enable correction, then press `s`. The list scrolls with the cursor. The API key is masked both when viewing and editing. Providers must support OpenAI-compatible `POST /chat/completions`, Bearer authentication and `choices[].message.content`. The defaults prefill DeepSeek’s Base URL and `deepseek-flash`, explicitly disable thinking and enable JSON output; the API key remains empty. Select `openai-compatible` for another compatible service, and supply its own URL/model. No model switching occurs. See the [DeepSeek API reference](https://api-docs.deepseek.com/api/create-chat-completion/).
+
+```toml
+[correction]
+enabled = false
+provider = "deepseek"                    # Also supports openai-compatible
+base_url = "https://api.deepseek.com"
+model = "deepseek-flash"
+api_key = ""                           # Enter locally
+timeout_ms = 8000
+```
+
+Context comes only from the conversation main region containing the focused Codex draft. The latest six loaded user messages and three loaded assistant replies are selected by their accessible role headings. Each user message is limited to 1,200 characters and each assistant reply to 2,800, with a total limit of 15,600. Long messages retain their beginning and end with an omission marker; the original conversation order is preserved. Only these messages, the current ASR transcript and configured hotwords are sent. The TUI shows actual sent message and character counts; logs also report the loaded message counts without recording context text. Missing context fails explicitly; unrelated recently active chats are never substituted. History not loaded into the virtualized view is unavailable. Grant Accessibility to the terminal that launches JustTalk.
+
+When DeepSeek is enabled, ASR requests append `DeepSeek` to the configured hotwords without rewriting preferences. Normal assistant streaming does not count as a chat switch; input changes, a changed user-message anchor or a changed draft prevent paste.
+
+Correction preserves intent while fixing transcription errors, technical terms, grammar, punctuation and paragraphs, and removing meaningless hesitation/repetition. Changes to numbers, code, URLs or attachment markers are rejected. Service errors, timeouts and changes to the chat/draft preserve the raw transcript in the clipboard, show an error and prevent automatic paste. Escape or a new recording cancels an in-flight model request. Config changes apply on the next recording. Model requests run in background finishing work, not recording/hotkey callbacks.
+
+Run `just-talk --check-codex-context`, then focus the Codex draft within five seconds. It reports message counts, input binding and timing without recording, contacting models or saving message text. Real conversation access and model latency still require validation against the specific Codex version/provider/model.
+
+Config files are saved with mode `0600` on macOS/Linux. Keys remain in local configuration and are not logged. Launching with `--config /path/trial.toml` makes the TUI save to that exact file. See the [Chat Completions API documentation](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) for the protocol.
 
 ## Changelog
 

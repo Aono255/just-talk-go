@@ -51,4 +51,9 @@ func TestOverlayUpdatesCaptionAndExpiresFinalPreview(t *testing.T) {
 	if !utf8.ValidString(b.text) || utf8.RuneCountInString(b.text) != 101 || !strings.HasSuffix(s.Transcript, b.text[3:]) {
 		t.Fatal("long preview did not retain the latest 100 Unicode characters")
 	}
+	s.State, s.Detail = "error", "服务未响应，原始识别已复制"
+	p.sync(s)
+	if b.text != s.Detail || b.label != "ERR" {
+		t.Fatal("error detail was hidden by the previous transcript")
+	}
 }

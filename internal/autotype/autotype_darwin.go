@@ -36,7 +36,7 @@ import (
 	"github.com/c/just-talk-go/internal/clipboard"
 )
 
-func pastePlatform(text string, logger *slog.Logger) error {
+func pastePlatform(text string, logger *slog.Logger, guard func() error) error {
 	cb, err := clipboard.New()
 	if err != nil {
 		return fmt.Errorf("clipboard: %w", err)
@@ -46,6 +46,11 @@ func pastePlatform(text string, logger *slog.Logger) error {
 	}
 
 	time.Sleep(50 * time.Millisecond)
+	if guard != nil {
+		if err := guard(); err != nil {
+			return err
+		}
+	}
 	if err := simulatePaste(); err != nil {
 		return fmt.Errorf("simulate paste: %w", err)
 	}

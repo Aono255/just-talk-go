@@ -7,10 +7,12 @@ import (
 
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/hotkey"
+	"github.com/c/just-talk-go/internal/correction"
 	"github.com/c/just-talk-go/plugins/voice"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -67,6 +69,7 @@ type Model struct {
 
 func New(cfg *config.Config) *Model {
 	vc := cfg.Voice
+	cc := cfg.Correction
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
 	fs := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
@@ -77,6 +80,18 @@ func New(cfg *config.Config) *Model {
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+		{label: "Codex 纠错", key: "correction_enabled", help: "macOS：结合当前聊天整理识别文字，再上屏", fType: fToggle, boolVal: cc.Enabled},
+		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
+		{label: "模型服务地址", key: "correction_base_url", help: "OpenAI 兼容 Base URL，通常含 /v1", fType: fString, input: ti(cc.BaseURL)},
+		{label: "纠错模型", key: "correction_model", help: "服务商提供的模型名；优先使用快速非思考模型", fType: fString, input: ti(cc.Model)},
+		{label: "模型 API Key", key: "correction_api_key", help: "只保存于本地配置，编辑时也隐藏", fType: fString, input: ti(cc.APIKey)},
+		{label: "纠错超时(ms)", key: "correction_timeout_ms", help: "500–30000；失败时保留原始识别，不自动上屏", fType: fString, input: ti(fmt.Sprint(cc.TimeoutMS))},
+	}
+	for i := range fs {
+		if fs[i].key == "correction_api_key" {
+			fs[i].input.EchoMode = textinput.EchoPassword
+			fs[i].input.EchoCharacter = '•'
+		}
 	}
 	return &Model{cfg: cfg, fields: fs, logs: make([]string, 0, 100), cursor: -1, showLogs: true}
 }
@@ -100,6 +115,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h, m.ready = msg.Width, msg.Height, true
+		for i := range m.fields {
+			m.fields[i].input.Width = max(10, m.w-24)
+		}
 	case tea.KeyMsg:
 		return m, m.handleKey(msg)
 	case backendMsg:
@@ -229,7 +247,26 @@ func (m *Model) save() {
 			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 		case "hotwords":
 			vc.Hotwords = splitList(f.input.Value())
+		case "correction_enabled":
+			next.Correction.Enabled = f.boolVal
+		case "correction_provider":
+			next.Correction.Provider = f.opts[f.optIdx]
+		case "correction_base_url":
+			next.Correction.BaseURL = strings.TrimSpace(f.input.Value())
+		case "correction_model":
+			next.Correction.Model = strings.TrimSpace(f.input.Value())
+		case "correction_api_key":
+			next.Correction.APIKey = strings.TrimSpace(f.input.Value())
+		case "correction_timeout_ms":
+			if _, err := fmt.Sscanf(f.input.Value(), "%d", &next.Correction.TimeoutMS); err != nil {
+				m.logf("❌ 纠错超时必须是毫秒整数")
+				return
+			}
 		}
+	}
+	if err := correction.Validate(next.Correction); err != nil {
+		m.logf("❌ %s", err)
+		return
 	}
 	combo, err := config.ParseHotkey(vc.PushToTalk)
 	if err != nil {
@@ -247,7 +284,7 @@ func (m *Model) save() {
 	if err := config.Save(m.cfg); err != nil {
 		m.logf("保存失败: %s", err)
 	} else {
-		m.logf("✅ 配置已保存到 %s", config.FindConfig())
+		m.logf("✅ 配置已保存到 %s", m.cfg.Path())
 	}
 	m.logf("  push_to_talk=%s", vc.PushToTalk)
 	if m.OnSave != nil {
@@ -303,8 +340,13 @@ func (m *Model) View() string {
 	b.WriteString(tStyle.Render("🎙️ 🗣️ Just Talk") + "\n")
 	b.WriteString(vStyle.Render("减少用键盘的次数，改用口喷吧。") + "\n")
 	b.WriteString(m.renderVoiceStats() + "\n\n")
-	b.WriteString(lStyle.Render("── 配置 (e 编辑, s 保存, h 帮助, j/k 导航) ──") + "\n")
+	rows := min(len(m.fields), max(3, min(8, m.h-16)))
+	first := max(0, min(m.cursor-rows+1, len(m.fields)-rows))
+	b.WriteString(lStyle.Render(fmt.Sprintf("── 配置 %d–%d/%d (e 编辑, s 保存, h 帮助, j/k 导航) ──", first+1, first+rows, len(m.fields))) + "\n")
 	for i, f := range m.fields {
+		if i < first || i >= first+rows {
+			continue
+		}
 		marker := "  "
 		if i == m.cursor {
 			if m.editing {
@@ -317,31 +359,22 @@ func (m *Model) View() string {
 		if m.helpVisible && f.help != "" {
 			line += " " + dStyle.Render("("+f.help+")")
 		}
-		b.WriteString(line + "\n")
+		b.WriteString(ansi.Truncate(line, max(1, m.w), "…") + "\n")
 	}
 	b.WriteString("\n" + lStyle.Render("── 录音状态 ──") + "\n")
-	b.WriteString("  " + m.renderVoiceStatus() + "\n")
+	b.WriteString("  " + ansi.Truncate(m.renderVoiceStatus(), max(1, m.w-2), "…") + "\n")
 	if m.showLogs {
 		b.WriteString("\n" + lStyle.Render("── 日志 (l 展开) ──") + "\n")
-		maxLogs := 5
+		maxLogs := max(1, min(5, m.h-strings.Count(b.String(), "\n")-2))
 		if m.logExpanded {
 			maxLogs = 100
 		}
-		// TUI internal logs
-		s := 0
-		if len(m.logs) > maxLogs {
-			s = len(m.logs) - maxLogs
+		logs := append(append([]string(nil), m.logs...), voice.TUILogs()...)
+		if len(logs) > maxLogs {
+			logs = logs[len(logs)-maxLogs:]
 		}
-		for _, l := range m.logs[s:] {
-			b.WriteString("  " + dStyle.Render(l) + "\n")
-		}
-		// Voice plugin logs
-		sv := 0
-		if len(voice.TUILogBuf) > maxLogs {
-			sv = len(voice.TUILogBuf) - maxLogs
-		}
-		for _, l := range voice.TUILogBuf[sv:] {
-			b.WriteString("  " + dStyle.Render(l) + "\n")
+		for _, line := range logs {
+			b.WriteString("  " + dStyle.Render(ansi.Truncate(line, max(1, m.w-2), "…")) + "\n")
 		}
 	}
 	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | h 帮助 | esc 退出编辑 | s 保存 | q 退出"))
@@ -383,6 +416,8 @@ func (m *Model) renderVoiceStatus() string {
 		label, style = "延迟停止", wStyle
 	case "stopping":
 		label, style = "停止中", wStyle
+	case "correcting":
+		label, style = "纠错中", wStyle
 	case "error":
 		label, style = "错误", eStyle
 	}
@@ -445,6 +480,9 @@ func (m *Model) renderField(i int, f field) string {
 	switch f.fType {
 	case fString:
 		v := f.input.Value()
+		if f.key == "correction_api_key" && !editing && v != "" {
+			v = "••••••••"
+		}
 		if f.key == "access_key" && !editing && len(v) > 8 {
 			v = v[:8] + "***"
 		}

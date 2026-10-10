@@ -23,7 +23,7 @@ const (
 	keyeventfKeyUp = 2
 )
 
-func pastePlatform(text string, logger *slog.Logger) error {
+func pastePlatform(text string, logger *slog.Logger, guard func() error) error {
 	cb, err := clipboard.New()
 	if err != nil {
 		return fmt.Errorf("clipboard: %w", err)
@@ -32,6 +32,11 @@ func pastePlatform(text string, logger *slog.Logger) error {
 		return fmt.Errorf("set clipboard: %w", err)
 	}
 	time.Sleep(50 * time.Millisecond)
+	if guard != nil {
+		if err := guard(); err != nil {
+			return err
+		}
+	}
 	if err := simulatePaste(); err != nil {
 		return fmt.Errorf("simulate paste: %w", err)
 	}

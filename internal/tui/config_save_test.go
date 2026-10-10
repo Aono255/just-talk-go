@@ -2,10 +2,12 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/c/just-talk-go/config"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSavePassesNewCredentialsToReload(t *testing.T) {
@@ -36,5 +38,33 @@ func TestSavePassesNewCredentialsToReload(t *testing.T) {
 	}
 	if saved.Voice.AccessKey != "new-token" {
 		t.Fatal("saving did not persist the new credentials")
+	}
+}
+
+func TestCorrectionKeyIsMaskedAndConfigurationViewportFits(t *testing.T) {
+	cfg := config.Default()
+	cfg.Correction.APIKey = "never-show-this-secret"
+	cfg.Correction.BaseURL = "https://example.invalid/v1"
+	model := New(cfg)
+	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	for i, f := range model.fields {
+		if f.key == "correction_api_key" {
+			model.cursor = i
+		}
+	}
+	for _, editing := range []bool{false, true} {
+		model.editing = editing
+		view := model.View()
+		if strings.Contains(view, cfg.Correction.APIKey) || !strings.Contains(view, "模型 API Key") {
+			t.Fatal("API key leaked or editing row is invisible")
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if ansi.StringWidth(line) > 80 {
+				t.Fatalf("field wrapped outside terminal: %q", line)
+			}
+		}
+		if strings.Count(view, "\n")+1 > 24 {
+			t.Fatal("configuration pushes recording status outside a 24-row terminal")
+		}
 	}
 }

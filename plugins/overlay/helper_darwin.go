@@ -3,7 +3,7 @@
 package overlay
 
 // #cgo CFLAGS: -fblocks
-// #cgo LDFLAGS: -framework AppKit -framework Foundation
+// #cgo LDFLAGS: -framework AppKit -framework Foundation -framework QuartzCore
 // #include <stdlib.h>
 // #include "overlay_darwin.h"
 import "C"
@@ -19,12 +19,13 @@ import (
 )
 
 type helperCommand struct {
-	Cmd   string `json:"cmd"`
-	Label string `json:"label,omitempty"`
-	Text  string `json:"text,omitempty"`
-	R     uint16 `json:"r,omitempty"`
-	G     uint16 `json:"g,omitempty"`
-	B     uint16 `json:"b,omitempty"`
+	Cmd   string  `json:"cmd"`
+	Label string  `json:"label,omitempty"`
+	Text  string  `json:"text,omitempty"`
+	R     uint16  `json:"r,omitempty"`
+	G     uint16  `json:"g,omitempty"`
+	B     uint16  `json:"b,omitempty"`
+	Level float64 `json:"level,omitempty"`
 }
 
 func RunHelper(position string, scale float64, input io.Reader) error {
@@ -49,6 +50,8 @@ func readHelperCommands(input io.Reader) {
 			continue
 		}
 		switch cmd.Cmd {
+		case "level":
+			C.jt_overlay_helper_level(C.double(cmd.Level))
 		case "show":
 			label := C.CString(cmd.Label)
 			text := C.CString(cmd.Text)

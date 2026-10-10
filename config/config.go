@@ -12,9 +12,20 @@ import (
 )
 
 type Config struct {
-	Voice   VoiceConfig   `toml:"voice"`
-	Debug   DebugConfig   `toml:"debug"`
-	Overlay OverlayConfig `toml:"overlay"`
+	path       string
+	Voice      VoiceConfig      `toml:"voice"`
+	Debug      DebugConfig      `toml:"debug"`
+	Overlay    OverlayConfig    `toml:"overlay"`
+	Correction CorrectionConfig `toml:"correction"`
+}
+
+type CorrectionConfig struct {
+	Provider  string `toml:"provider"`
+	Enabled   bool   `toml:"enabled"`
+	BaseURL   string `toml:"base_url"`
+	Model     string `toml:"model"`
+	APIKey    string `toml:"api_key"`
+	TimeoutMS int    `toml:"timeout_ms"`
 }
 
 type DebugConfig struct {
@@ -53,6 +64,7 @@ func Default() *Config {
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
 		},
+		Correction: CorrectionConfig{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-flash", TimeoutMS: 8000},
 	}
 }
 
@@ -64,6 +76,7 @@ func Load(path string) (*Config, error) {
 	if path == "" {
 		return cfg, nil
 	}
+	cfg.path = path
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -94,7 +107,10 @@ func FindConfig() string {
 }
 
 func Save(cfg *Config) error {
-	path := FindConfig()
+	path := cfg.path
+	if path == "" {
+		path = FindConfig()
+	}
 	if path == "" {
 		path = DefaultPath()
 		if path == "" {
@@ -104,12 +120,25 @@ func Save(cfg *Config) error {
 			return err
 		}
 	}
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	if err := f.Chmod(0600); err != nil {
+		return err
+	}
 	return toml.NewEncoder(f).Encode(cfg)
+}
+
+func (cfg *Config) Path() string {
+	if cfg.path != "" {
+		return cfg.path
+	}
+	if path := FindConfig(); path != "" {
+		return path
+	}
+	return DefaultPath()
 }
 
 // DefaultPath returns the platform-standard per-user configuration path.

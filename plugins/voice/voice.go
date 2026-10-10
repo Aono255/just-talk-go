@@ -19,6 +19,7 @@ import (
 	"github.com/c/just-talk-go/hotkey"
 	"github.com/c/just-talk-go/internal/autotype"
 	"github.com/c/just-talk-go/internal/clipboard"
+	"github.com/c/just-talk-go/internal/correction"
 )
 
 const (
@@ -54,6 +55,7 @@ type TUIVoiceStatus struct {
 	SessionID       uint64
 	PendingFinishes int
 	Transcript      string
+	AudioLevel      float64
 	TranscriptUntil time.Time
 	LastHotkeyAt    time.Time
 	LastHotkeyType  string
@@ -107,6 +109,12 @@ func DisableTUILog() {
 	TUILog = nil
 	TUILogBuf = nil
 	tuilogMu.Unlock()
+}
+
+func TUILogs() []string {
+	tuilogMu.Lock()
+	defer tuilogMu.Unlock()
+	return append([]string(nil), TUILogBuf...)
 }
 
 func TUIStats() TUIVoiceStats {
@@ -275,6 +283,11 @@ type VoicePlugin struct {
 	finishingSessions      map[uint64]struct{}
 	canceledSessions       map[uint64]struct{}
 	outputSessions         map[uint64]struct{}
+	sessionCorrection      config.CorrectionConfig
+	sessionHotwords        []string
+	correctionCancels      map[uint64]context.CancelFunc
+	correctionCapture      func() (*correction.Target, error)
+	correctionClipboard    func(string) error
 	errorUntil             time.Time
 	errorTimer             *time.Timer
 	lastError              string
@@ -292,6 +305,8 @@ type recordingSession struct {
 	autoSubmit  bool
 	userStopped bool
 	startedAt   time.Time
+	correction  config.CorrectionConfig
+	hotwords    []string
 }
 
 func NewVoicePlugin() *VoicePlugin     { return &VoicePlugin{stopDelayMs: defaultStopDelayMs} }
@@ -548,6 +563,7 @@ func (p *VoicePlugin) startRecording() {
 	}
 	vc := p.cfg.Voice
 	asrCfg := ASRConfig{AppKey: vc.AppKey, AccessKey: vc.AccessKey, ResourceID: vc.ResourceID, Language: vc.Language, Hotwords: vc.Hotwords}
+	asrCfg.Hotwords = correction.Hotwords(asrCfg.Hotwords, p.cfg.Correction)
 	if asrCfg.ResourceID == "" {
 		asrCfg.ResourceID = "volc.bigasr.sauc.duration"
 	}
@@ -562,6 +578,11 @@ func (p *VoicePlugin) startRecording() {
 	}
 	p.sessionID++
 	p.sessionGen++
+	p.sessionCorrection = p.cfg.Correction
+	p.sessionHotwords = append([]string(nil), asrCfg.Hotwords...)
+	for _, cancel := range p.correctionCancels {
+		cancel()
+	}
 	sessionID := p.sessionID
 	sessionGen := p.sessionGen
 	p.starting, p.startCanceled = true, false
@@ -665,7 +686,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	go client.ReceiveLoop(ctx)
 	go func() {
 		defer close(audioDone)
-		p.streamAudio(ctx, rec, client)
+		p.streamAudio(ctx, rec, client, sessionID)
 	}()
 	go func() {
 		for result := range client.Results() {
@@ -711,6 +732,9 @@ func (p *VoicePlugin) cancelRecording() {
 		}
 		for id := range p.finishingSessions {
 			p.canceledSessions[id] = struct{}{}
+		}
+		for _, cancel := range p.correctionCancels {
+			cancel()
 		}
 		p.pendingDone = 0
 	}
@@ -784,6 +808,8 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		autoSubmit:  p.autoSubmit,
 		userStopped: p.userStopped,
 		startedAt:   p.startedAt,
+		correction:  p.sessionCorrection,
+		hotwords:    p.sessionHotwords,
 	}
 	p.sessionGen++
 	p.recorder, p.asrClient, p.asrCancel, p.audioDone = nil, nil, nil, nil
@@ -814,6 +840,8 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		session.asrCancel()
 	}
 	var remaining []byte
+	var finalText string
+	var audioDuration time.Duration
 	if session.recorder != nil {
 		p.logger.Debug("finish session: stopping recorder")
 		remaining, _ = session.recorder.Stop()
@@ -867,12 +895,10 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		}
 		if text := session.asrClient.LastText(); text != "" && session.userStopped && p.claimSessionOutput(session.sessionID) {
 			p.updateTranscript(session.sessionID, text)
-			audioDuration := time.Duration(0)
+			finalText = text
 			if !session.startedAt.IsZero() {
 				audioDuration = time.Since(session.startedAt)
 			}
-			recordTUIStats(text, audioDuration)
-			p.dispatchTextOutput(text, session.autoSubmit)
 		}
 		p.logger.Debug("finish session: closing ASR client")
 		closeDone := make(chan error, 1)
@@ -888,6 +914,10 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	}
 	if session.asrCancel != nil {
 		session.asrCancel()
+	}
+	if finalText != "" {
+		recordTUIStats(finalText, audioDuration)
+		p.outputTranscript(session, finalText)
 	}
 	p.logger.Debug("finish session: done")
 }
@@ -984,6 +1014,9 @@ func (p *VoicePlugin) publishStatusLocked() {
 		state, detail = "connecting", "录音中，正在连接 ASR"
 	case p.recording:
 		state, detail = "recording", "录音中"
+	case len(p.correctionCancels) > 0:
+		state, detail = "correcting", "结合当前 Codex 聊天纠错整理"
+		stopping = true
 	case p.pendingDone > 0:
 		state, detail = "stopping", "正在停止并等待识别结果"
 		stopping = true
@@ -1029,6 +1062,9 @@ func (p *VoicePlugin) publishError(detail string, sessionID uint64) {
 func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recording, stopping bool, stopAt time.Time, sessionID uint64) {
 	pendingDone := p.pendingDone
 	setTUIStatus(func(s *TUIVoiceStatus) {
+		if s.SessionID != sessionID || !recording {
+			s.AudioLevel = 0
+		}
 		s.State, s.Detail = state, detail
 		s.Recording, s.Stopping = recording, stopping
 		s.StopAt = stopAt
@@ -1107,7 +1143,7 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client *ASRClient) {
+func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client *ASRClient, sessionID uint64) {
 	buf := make([]byte, 6400)
 	for {
 		select {
@@ -1117,6 +1153,7 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client *AS
 		}
 		n, err := rec.Read(buf)
 		if n > 0 {
+			updateAudioLevel(sessionID, buf[:n])
 			sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
 			sendErr := client.SendAudio(sendCtx, buf[:n], false)
 			sendCancel()

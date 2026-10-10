@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/engine"
 	"github.com/c/just-talk-go/hotkey"
+	"github.com/c/just-talk-go/internal/correction"
 	"github.com/c/just-talk-go/internal/doctor"
 	"github.com/c/just-talk-go/internal/tui"
 	"github.com/c/just-talk-go/plugins"
@@ -36,11 +38,39 @@ func main() {
 	useTUI := flag.Bool("tui", true, "run with terminal UI")
 	noTUI := flag.Bool("no-tui", false, "run without terminal UI")
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
+	checkCodexContext := flag.Bool("check-codex-context", false, "wait 5 seconds, then check focused Codex context without recording or sending text")
 	installOnly := flag.Bool("install", false, "install just-talk for the current user")
 	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
 	flag.Parse()
+	if *checkCodexContext {
+		fmt.Println("请在 5 秒内回到 Codex 当前聊天，并把光标放在草稿框。仅检查上下文，不录音、不访问模型服务、不保存消息正文。")
+		time.Sleep(5 * time.Second)
+		started := time.Now()
+		target, err := correction.Capture()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "上下文检查失败: %s\n", err)
+			os.Exit(1)
+		}
+		defer target.Close()
+		users, assistants, chars := 0, 0, 0
+		for _, message := range target.Messages {
+			if message.Role == "user" {
+				users++
+			} else {
+				assistants++
+			}
+			chars += len([]rune(message.Text))
+		}
+		if err := target.Guard(); err != nil {
+			fmt.Fprintf(os.Stderr, "输入框绑定检查失败: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("已载入：用户消息 %d，助手回复 %d。\n", target.AvailableUsers, target.AvailableAssistants)
+		fmt.Printf("实际纠错上下文：用户消息 %d，助手回复 %d，共 %d 字符；输入框绑定正常，耗时 %dms。\n", users, assistants, chars, time.Since(started).Milliseconds())
+		return
+	}
 	if *versionOnly {
 		fmt.Printf("just-talk %s (%s)\n", version, commit)
 		return
@@ -127,7 +157,7 @@ func main() {
 	}
 	eng.LoadPlugin(voice.NewVoicePlugin())
 	eng.LoadPlugin(overlay.NewOverlayPlugin())
-	if p := config.FindConfig(); p != "" {
+	if p := cfg.Path(); p != "" {
 		eng.WatchConfig(p)
 	}
 
