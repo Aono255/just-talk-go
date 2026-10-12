@@ -97,8 +97,17 @@ func TestNativeFocusReadErrorsRemainExplicitBeforeBindingChecks(t *testing.T) {
 #include <assert.h>
 static AXError copyStatus;
 static CFTypeRef copyValue;
+static AXError roleStatus;
+static CFTypeRef roleValue;
+static int roleReads, focusReads, delayedReads;
 static AXError copyFocus(AXUIElementRef app, CFStringRef name, CFTypeRef *value) {
+    if (CFEqual(name,kAXRoleAttribute)) {
+        ++roleReads; *value=roleValue?CFRetain(roleValue):NULL; return roleStatus;
+    }
     assert(CFEqual(name,kAXFocusedUIElementAttribute));
+    assert(roleReads>0);
+    ++focusReads;
+    if (delayedReads>0) { --delayedReads; *value=NULL; return kAXErrorNoValue; }
     *value=copyValue?CFRetain(copyValue):NULL;
     return copyStatus;
 }
@@ -109,11 +118,14 @@ static CFTypeID fixtureElementType(void) { return CFDictionaryGetTypeID(); }
 int main(void) { @autoreleasepool {
     jt_correction_target target={0}; target.pid=123;
     target.app=(AXUIElementRef)@{@"id":@"fixture-app"};
+    roleStatus=kAXErrorSuccess; roleValue=kAXApplicationRole;
     for (int i=0;i<3;i++) {
         copyStatus=i==0?kAXErrorNoValue:i==1?kAXErrorCannotComplete:kAXErrorSuccess;
         copyValue=NULL;
         char *error=NULL;
+        NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
         assert(jt_correction_guard(&target,123,&error)==0);
+        assert(NSProcessInfo.processInfo.systemUptime-started<1.2);
         assert(error && strstr(error,"AX "));
         assert(strstr(error,i==1?"-25204":"-25212"));
         assert(!strstr(error,"切换")); free(error);
@@ -125,6 +137,16 @@ int main(void) { @autoreleasepool {
     copyValue=(CFTypeRef)@{@"id":@"fixture-editor"};
     assert(focused(target.app,&error)==(AXUIElementRef)copyValue);
     assert(error==NULL);
+    roleReads=focusReads=0; delayedReads=2;
+    assert(focused(target.app,&error)==(AXUIElementRef)copyValue);
+    assert(error==NULL && roleReads==1 && focusReads==3);
+    for (int i=0;i<3;i++) {
+        roleReads=focusReads=0;
+        roleStatus=i==0?kAXErrorCannotComplete:kAXErrorSuccess;
+        roleValue=i==1?(CFTypeRef)kAXWindowRole:i==2?NULL:(CFTypeRef)kAXApplicationRole;
+        assert(focused(target.app,&error)==NULL);
+        assert(error && roleReads==1 && focusReads==0); free(error); error=NULL;
+    }
 } return 0; }`
 	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
 		t.Fatal(err)

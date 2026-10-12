@@ -332,7 +332,9 @@ The system-wide AX focus query used in `v0.1.8` returned `-25204` immediately on
 
 ### No usable input focus (AX -25212)
 
-The application's accessibility interface returned no focused element. This does not establish that the user failed to click the input or switched conversations. Other `AX` error codes are also reported, separating read failures from draft/conversation checks performed after a valid focus is obtained. Keep the current draft focused and run `just-talk --check-context` from the terminal that launches Just Talk. Capture failure in a matched Codex client stops automatic paste and preserves the raw transcript, without context-free correction.
+The application's accessibility interface returned no focused element. This does not establish that the user failed to click the input or switched conversations. On-device comparison returned `-25212` initially, then six consecutive `AXTextArea` focus results from the same Codex process after querying its standard application role. The reader validates that role before retrieving focus. Initial no-value results have a 500 ms readiness budget for the same app, excluding time spent inside a blocking system call; ready inputs have no fixed delay. No screen-reader switches or system permissions are changed.
+
+Other `AX` error codes are also reported, separating read failures from draft/conversation checks performed after a valid focus is obtained. Keep the current draft focused and run `just-talk --check-context` from the terminal that launches Just Talk. Capture failure in a matched Codex client stops automatic paste and preserves the raw transcript, without context-free correction.
 
 ### No audio within 3 seconds after reconnecting a headset
 

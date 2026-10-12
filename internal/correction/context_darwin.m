@@ -22,8 +22,29 @@ static id attribute(AXUIElementRef element, CFStringRef name) {
 }
 
 static AXUIElementRef focused(AXUIElementRef app, char **error) {
+    // Chromium activates its standard accessibility interface when the app role
+    // is queried. Reading focus first can otherwise return kAXErrorNoValue.
+    CFTypeRef role=NULL;
+    AXError status=AXUIElementCopyAttributeValue(app,kAXRoleAttribute,&role);
+    if (status!=kAXErrorSuccess || !role) {
+        if (role) CFRelease(role);
+        fail(error,[NSString stringWithFormat:@"输入应用的辅助功能角色读取失败（AX %d），无法确认上屏目标",status==kAXErrorSuccess?kAXErrorNoValue:status]);
+        return NULL;
+    }
+    BOOL isApplication=CFGetTypeID(role)==CFStringGetTypeID() && CFEqual(role,kAXApplicationRole);
+    CFRelease(role);
+    if (!isApplication) { fail(error,@"输入应用的辅助功能角色无效，无法确认上屏目标"); return NULL; }
+
     CFTypeRef value=NULL;
-    AXError status=AXUIElementCopyAttributeValue(app,kAXFocusedUIElementAttribute,&value);
+    NSTimeInterval deadline=NSProcessInfo.processInfo.systemUptime+0.5;
+    for (;;) {
+        status=AXUIElementCopyAttributeValue(app,kAXFocusedUIElementAttribute,&value);
+        if (status!=kAXErrorNoValue || NSProcessInfo.processInfo.systemUptime>=deadline) break;
+        if (value) { CFRelease(value); value=NULL; }
+        // Only wait for the newly initialized focus; never change the target or
+        // continue with a different window, missing context or another API.
+        [NSThread sleepForTimeInterval:0.05];
+    }
     if (status!=kAXErrorSuccess || !value) {
         if (value) CFRelease(value);
         fail(error,[NSString stringWithFormat:@"当前应用未提供可用输入焦点（AX %d），无法确认上屏目标",status==kAXErrorSuccess?kAXErrorNoValue:status]);

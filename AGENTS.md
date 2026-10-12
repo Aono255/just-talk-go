@@ -125,6 +125,8 @@ The ASR generation and billing resource use the existing `voice.resource_id` fie
 
 Context correction is a shared pipeline. `internal/correction/context.go` selects one uniquely matching adapter before reading a conversation, and each platform registers its supported sources. Currently only macOS Codex Desktop is registered; its native capture, input checks and feedback reader live in `context_codex_darwin.go`. OMP and terminal clients are not enabled. An unsupported application uses ordinary voice input, but a failure from a matched source remains an explicit error and must not bypass its input guard. Check the bound input before the model request and again before output. Learning feedback must belong to the same source ID; the adapter must also validate its conversation and sent-message anchors before accepting it.
 
+The macOS context reader queries and validates `AXRole == AXApplication` before reading `AXFocusedUIElement`, which activates Chromium's standard accessibility interface. Initial `kAXErrorNoValue` has a 500 ms readiness budget for that same app; this does not interrupt a blocking AX call. Other errors stop immediately. Preserve AX failure codes. Do not substitute another window or unbound input, or force screen-reader attributes such as `AXManualAccessibility` or `AXEnhancedUserInterface`.
+
 ## UI And Logging
 
 TUI mode must not write normal logs to stdout/stderr because it corrupts the Bubble Tea layout. TUI logs go through the in-app log/status area; debug event details should only be visible when `--debug` is enabled.
