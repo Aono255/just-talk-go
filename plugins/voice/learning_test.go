@@ -66,7 +66,7 @@ func TestLearningUsesSentFeedbackAndReusesLocalMemoryWithoutExtraRequests(t *tes
 			closed := 0
 			p.correctionCapture = func() (*correction.Target, error) {
 				index := len(targets)
-				target := &correction.Target{Messages: []correction.Message{{Role: "user", Text: "D01 平台配置"}}, Guard: func() error { return nil }, Close: func() { closed++ }}
+				target := &correction.Target{Source: correction.Source{ID: correction.CodexDesktopSourceID, Name: "Codex Desktop"}, Messages: []correction.Message{{Role: "user", Text: "D01 平台配置"}}, Guard: func() error { return nil }, Close: func() { closed++ }}
 				target.SubmittedAfter = func(previous *correction.Target) (string, bool) {
 					return "使用 D01。", confirmed && index == 1 && previous == targets[0]
 				}

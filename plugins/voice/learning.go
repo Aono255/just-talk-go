@@ -44,7 +44,7 @@ func (p *VoicePlugin) prepareLearning(sessionID uint64, target *correction.Targe
 	if previous == nil || time.Since(previous.created) > 30*time.Minute || target.SubmittedAfter == nil {
 		return learning
 	}
-	submitted, ok := target.SubmittedAfter(previous.target)
+	submitted, ok := target.SubmittedTextAfter(previous.target)
 	if !ok {
 		return learning
 	}
@@ -60,7 +60,7 @@ func (p *VoicePlugin) prepareLearning(sessionID uint64, target *correction.Targe
 }
 
 func (p *VoicePlugin) retainLearningTarget(sessionID uint64, target *correction.Target, draft, corrected string) bool {
-	if target.SubmittedAfter == nil {
+	if target.Source.ID == "" || target.SubmittedAfter == nil {
 		return false
 	}
 	p.mu.Lock()

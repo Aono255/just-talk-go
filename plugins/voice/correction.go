@@ -37,8 +37,8 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 		capture = correction.Capture
 	}
 	target, err := capture()
-	if errors.Is(err, correction.ErrNotCodex) {
-		// Codex 纠错仅作用于 Codex；其他应用仍按原语音输入流程上屏。
+	if errors.Is(err, correction.ErrUnsupportedContext) {
+		// Unsupported clients use ordinary voice input without context/model reads.
 		p.dispatchTextOutput(text, session.autoSubmit)
 		return
 	}
@@ -91,9 +91,13 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 		chars += len([]rune(message.Text))
 		mentionsDeepSeek = mentionsDeepSeek || strings.Contains(strings.ToLower(message.Text), "deepseek")
 	}
-	p.logger.Info("correction context", "available_user_messages", target.AvailableUsers, "available_assistant_messages", target.AvailableAssistants, "user_messages", users, "assistant_messages", assistants, "context_chars", chars, "mentions_deepseek", mentionsDeepSeek)
-	pout("✨ 纠错中 · 上下文用户 %d / 助手 %d · %d 字符", users, assistants, chars)
+	p.logger.Info("correction context", "source", target.Source.ID, "available_user_messages", target.AvailableUsers, "available_assistant_messages", target.AvailableAssistants, "user_messages", users, "assistant_messages", assistants, "context_chars", chars, "mentions_deepseek", mentionsDeepSeek)
+	pout("✨ 上下文修正 · %s · 用户 %d / 助手 %d · %d 字符", target.Source.Name, users, assistants, chars)
 	started := time.Now()
+	if err := target.Guard(); err != nil {
+		p.correctionFailed(session.sessionID, err)
+		return
+	}
 	learning := p.prepareLearning(session.sessionID, target, session.correction.Learning)
 	corrected, err := correction.Correct(ctx, session.correction, text, target.Messages, session.hotwords, learning)
 	if !p.correctionSessionCurrent(session.sessionID) || ctx.Err() != nil {

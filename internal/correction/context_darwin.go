@@ -20,11 +20,6 @@ import (
 	"unsafe"
 )
 
-type applicationIdentity struct {
-	PID      int    `json:"pid"`
-	BundleID string `json:"bundle_id"`
-}
-
 func focusHelperPlatform(output io.Writer) error {
 	var pid C.pid_t
 	var bundle, failure *C.char
@@ -80,77 +75,13 @@ func capturePlatform() (*Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	if app.BundleID != "com.openai.codex" {
-		return nil, ErrNotCodex
-	}
-	var native *C.jt_correction_target
-	var data, failure *C.char
-	status := C.jt_correction_capture(C.pid_t(app.PID), &native, &data, &failure)
-	if data != nil {
-		defer C.free(unsafe.Pointer(data))
-	}
-	if failure != nil {
-		defer C.free(unsafe.Pointer(failure))
-	}
-	if status == 0 {
-		return nil, ErrNotCodex
-	}
-	if status != 1 {
-		if failure != nil {
-			return nil, errors.New(C.GoString(failure))
-		}
-		return nil, errors.New("无法读取当前 Codex 聊天上下文")
-	}
-	var messages []Message
-	if json.Unmarshal([]byte(C.GoString(data)), &messages) != nil {
-		C.jt_correction_release(native)
-		return nil, errors.New("当前聊天上下文格式不正确")
-	}
-	availableUsers, availableAssistants := 0, 0
-	for _, message := range messages {
-		if message.Role == "user" {
-			availableUsers++
-		} else {
-			availableAssistants++
-		}
-	}
-	messages, err = Recent(messages)
-	if err != nil {
-		C.jt_correction_release(native)
-		return nil, err
-	}
-	return &Target{Messages: messages, AvailableUsers: availableUsers, AvailableAssistants: availableAssistants, platform: native, Close: func() { C.jt_correction_release(native) },
-		SubmittedAfter: func(previous *Target) (string, bool) {
-			if previous == nil {
-				return "", false
-			}
-			prior, ok := previous.platform.(*C.jt_correction_target)
-			if !ok {
-				return "", false
-			}
-			var text *C.char
-			if C.jt_correction_submitted_after(native, prior, &text) != 1 || text == nil {
-				return "", false
-			}
-			defer C.free(unsafe.Pointer(text))
-			return C.GoString(text), true
-		},
-		Guard: func() error {
-			front, err := currentApplication()
-			if err != nil {
-				return err
-			}
-			if front.BundleID != "com.openai.codex" {
-				return errors.New("纠错期间切换了应用，结果未上屏")
-			}
-			var errorText *C.char
-			if C.jt_correction_guard(native, C.pid_t(front.PID), &errorText) == 1 {
-				return nil
-			}
-			if errorText != nil {
-				defer C.free(unsafe.Pointer(errorText))
-				return errors.New(C.GoString(errorText))
-			}
-			return errors.New("Codex 输入框已经变化")
-		}}, nil
+	return captureForApplication(app, platformContextAdapters())
+}
+
+func platformContextAdapters() []contextAdapter {
+	return []contextAdapter{{
+		Source:  Source{ID: CodexDesktopSourceID, Name: "Codex Desktop"},
+		Matches: func(app applicationIdentity) bool { return app.BundleID == "com.openai.codex" },
+		Capture: captureCodexDesktop,
+	}}
 }

@@ -41,6 +41,7 @@ Useful runtime commands:
 just-talk               # TUI mode, default
 just-talk --no-tui      # daemon mode
 just-talk --doctor      # startup environment check
+just-talk --check-context # context source and input binding check; currently macOS Codex Desktop
 just-talk --backend x11
 just-talk --backend wayland
 ```
@@ -98,6 +99,7 @@ Core packages:
 - `plugins/overlay/`: recording status capsule for Linux, macOS, and Windows.
 - `internal/autotype/`: platform paste/auto-submit implementation.
 - `internal/clipboard/`: platform clipboard implementation.
+- `internal/correction/`: context source adapters, model client, glossary and local learning memory.
 - `internal/doctor/`: startup environment checks.
 - `internal/tui/`: Bubble Tea configuration UI.
 
@@ -118,6 +120,10 @@ Stopping a recording is intentionally split from hotkey handling:
 - Debug logs should identify whether a stop is waiting on recorder, final audio send, ASR final, clipboard, or ASR client close.
 
 Avoid double-output bugs: recognized final text should be dispatched once per user-stopped session. If changing ASR result handling, check both `Final()` and `Done()` paths.
+
+The ASR generation and billing resource use the existing `voice.resource_id` field. `config.ASRResources()` defines the four Doubao 1.0/2.0 duration/concurrency choices. Preserve custom IDs when saving unrelated TUI fields. A recording keeps its start-time ASR configuration snapshot; saving a new resource only affects subsequent recordings. Both generations use the existing streaming endpoint and `model_name: bigmodel`; do not infer a new wire protocol from the resource prefix or silently switch resources after an error.
+
+Context correction is a shared pipeline. `internal/correction/context.go` selects one uniquely matching adapter before reading a conversation, and each platform registers its supported sources. Currently only macOS Codex Desktop is registered; its native capture, input checks and feedback reader live in `context_codex_darwin.go`. OMP and terminal clients are not enabled. An unsupported application uses ordinary voice input, but a failure from a matched source remains an explicit error and must not bypass its input guard. Check the bound input before the model request and again before output. Learning feedback must belong to the same source ID; the adapter must also validate its conversation and sent-message anchors before accepting it.
 
 ## UI And Logging
 

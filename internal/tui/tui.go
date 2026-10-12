@@ -40,14 +40,15 @@ const (
 )
 
 type field struct {
-	label   string
-	key     string
-	help    string
-	fType   fieldType
-	input   textinput.Model
-	boolVal bool
-	opts    []string
-	optIdx  int
+	label     string
+	key       string
+	help      string
+	fType     fieldType
+	input     textinput.Model
+	boolVal   bool
+	opts      []string
+	optLabels []string
+	optIdx    int
 }
 
 type Model struct {
@@ -75,13 +76,14 @@ func New(cfg *config.Config) *Model {
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
+		asrResourceField(vc.ResourceID),
 		{label: "App Key", key: "app_key", help: "火山 App ID", fType: fString, input: ti(vc.AppKey)},
 		{label: "Access Key", key: "access_key", help: "火山 Access Token", fType: fString, input: ti(vc.AccessKey)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 		{label: "火山热词表 ID", key: "boosting_table_id", help: "填写后识别使用云端词表；留空使用热词", fType: fString, input: ti(vc.BoostingTableID)},
-		{label: "Codex 纠错", key: "correction_enabled", help: "macOS：结合当前聊天整理识别文字，再上屏", fType: fToggle, boolVal: cc.Enabled},
+		{label: "上下文修正", key: "correction_enabled", help: "当前支持 macOS Codex Desktop；其他应用使用普通语音输入", fType: fToggle, boolVal: cc.Enabled},
 		{label: "纠错自学习", key: "correction_learning", help: "下次录音核对上一段发送内容；本机保存术语和表达偏好", fType: fToggle, boolVal: cc.Learning},
 		{label: "AI 纠错术语", key: "correction_terms", help: "逗号分隔；仅供纠错模型参考，不传给语音识别", fType: fString, input: ti(strings.Join(cc.Terms, ", "))},
 		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
@@ -97,6 +99,28 @@ func New(cfg *config.Config) *Model {
 		}
 	}
 	return &Model{cfg: cfg, fields: fs, logs: make([]string, 0, 100), cursor: -1, showLogs: true}
+}
+
+func asrResourceField(resourceID string) field {
+	if resourceID == "" {
+		resourceID = config.DefaultASRResourceID
+	}
+	f := field{label: "识别模型", key: "resource_id", help: "需开通对应服务；保存后下次录音生效", fType: fSelect}
+	for _, resource := range config.ASRResources() {
+		f.opts = append(f.opts, resource.ID)
+		f.optLabels = append(f.optLabels, resource.Label)
+	}
+	// Saving another setting must not silently replace a custom resource ID.
+	found := false
+	for _, id := range f.opts {
+		found = found || id == resourceID
+	}
+	if !found {
+		f.opts = append(f.opts, resourceID)
+		f.optLabels = append(f.optLabels, "自定义识别资源")
+	}
+	f.optIdx = idxOf(f.opts, resourceID)
+	return f
 }
 
 func (m *Model) SetDebug(debug bool) {
@@ -240,6 +264,8 @@ func (m *Model) save() {
 			vc.PushToTalk = f.input.Value()
 		case "mode":
 			vc.Mode = f.opts[f.optIdx]
+		case "resource_id":
+			vc.ResourceID = f.opts[f.optIdx]
 		case "app_key":
 			vc.AppKey = f.input.Value()
 		case "access_key":
@@ -506,6 +532,9 @@ func (m *Model) renderField(i int, f field) string {
 		return dStyle.Render("○ 关  (空格)")
 	case fSelect:
 		v := f.opts[f.optIdx]
+		if len(f.optLabels) == len(f.opts) {
+			v = f.optLabels[f.optIdx]
+		}
 		if editing {
 			return aStyle.Render("[" + v + " ▲▼]")
 		}

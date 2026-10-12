@@ -13,8 +13,62 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c/just-talk-go/config"
 	"github.com/coder/websocket"
 )
+
+func TestASRVersionsUseSelectedHandshakeResourceAndTheSamePCMProtocol(t *testing.T) {
+	for _, resource := range config.ASRResources() {
+		t.Run(resource.ID, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			received := make(chan []byte, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Api-Resource-Id") != resource.ID || r.Header.Get("X-Api-App-Key") != "test-app" || r.Header.Get("X-Api-Access-Key") != "test-token" {
+					t.Error("WebSocket handshake changed the model or legacy credentials")
+				}
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer conn.CloseNow()
+				_, frame, err := conn.Read(ctx)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				received <- frame
+			}))
+			defer server.Close()
+			client := NewASRClient(ASRConfig{AppKey: "test-app", AccessKey: "test-token", ResourceID: resource.ID}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err := client.connect(ctx, strings.Replace(server.URL, "http://", "ws://", 1)); err != nil {
+				t.Fatal(err)
+			}
+			defer client.conn.CloseNow()
+			select {
+			case frame := <-received:
+				if len(frame) < 8 || int(binary.BigEndian.Uint32(frame[4:8])) != len(frame)-8 {
+					t.Fatal("invalid initial frame")
+				}
+				var payload struct {
+					Audio struct {
+						Format              string
+						Rate, Bits, Channel int
+					}
+					Request struct {
+						ModelName string `json:"model_name"`
+					}
+				}
+				if json.Unmarshal(frame[8:], &payload) != nil || payload.Request.ModelName != "bigmodel" || payload.Audio.Format != "pcm" || payload.Audio.Rate != 16000 || payload.Audio.Bits != 16 || payload.Audio.Channel != 1 {
+					t.Fatal("model switching changed the audio protocol")
+				}
+			case <-ctx.Done():
+				t.Fatal("ASR initialization did not arrive")
+			}
+		})
+	}
+}
 
 func TestASRRequestSelectsCloudTableOrInlineHotwords(t *testing.T) {
 	for _, mode := range []string{"empty", "inline", "cloud", "both"} {

@@ -39,6 +39,7 @@ func main() {
 	noTUI := flag.Bool("no-tui", false, "run without terminal UI")
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
 	checkCodexContext := flag.Bool("check-codex-context", false, "wait 5 seconds, then check focused Codex context without recording or sending text")
+	checkContext := flag.Bool("check-context", false, "wait 5 seconds, then check the current context source and input binding without recording or networking")
 	installOnly := flag.Bool("install", false, "install just-talk for the current user")
 	focusHelper := flag.Bool("focus-helper", false, "internal: query frontmost application once")
 	showMemory := flag.Bool("show-correction-memory", false, "show locally learned correction references")
@@ -54,8 +55,8 @@ func main() {
 		}
 		return
 	}
-	if *checkCodexContext {
-		fmt.Println("请在 5 秒内回到 Codex 当前聊天，并把光标放在草稿框。仅检查上下文，不录音、不访问模型服务、不保存消息正文。")
+	if *checkCodexContext || *checkContext {
+		fmt.Println("请在 5 秒内回到支持的客户端并点击输入框（当前支持 macOS Codex Desktop）。仅检查上下文，不录音、不访问模型服务、不保存消息正文。")
 		time.Sleep(5 * time.Second)
 		started := time.Now()
 		target, err := correction.Capture()
@@ -64,6 +65,11 @@ func main() {
 			os.Exit(1)
 		}
 		defer target.Close()
+		if *checkCodexContext && target.Source.ID != correction.CodexDesktopSourceID {
+			fmt.Fprintln(os.Stderr, "当前输入不属于 Codex Desktop。")
+			os.Exit(1)
+		}
+		fmt.Printf("上下文来源：%s。\n", target.Source.Name)
 		users, assistants, chars := 0, 0, 0
 		for _, message := range target.Messages {
 			if message.Role == "user" {

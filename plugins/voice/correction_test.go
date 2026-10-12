@@ -24,7 +24,7 @@ func TestCorrectionRoutingKeepsOtherAppsUsableAndReportsCodexFocusErrors(t *test
 		captureErr error
 		wantError  bool
 	}{
-		{"other_app", correction.ErrNotCodex, false},
+		{"other_app", correction.ErrUnsupportedContext, false},
 		{"codex_without_draft", errors.New("请把光标放在 Codex 草稿框；未识别到同一聊天主区域"), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,11 +102,13 @@ func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T
 			p.sessionID = 7
 			p.pendingDone = 1
 			p.finishingSessions = map[uint64]struct{}{7: {}}
+			var guardCalls atomic.Int32
 			p.correctionCapture = func() (*correction.Target, error) {
 				return &correction.Target{
+					Source:   correction.Source{ID: correction.CodexDesktopSourceID, Name: "Codex Desktop"},
 					Messages: []correction.Message{{Role: "user", Text: "Codex 插件"}}, Close: func() {},
 					Guard: func() error {
-						if mode == "changed" {
+						if guardCalls.Add(1) > 1 && mode == "changed" {
 							return errors.New("当前聊天已切换")
 						}
 						return nil
@@ -143,5 +145,41 @@ func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T
 				t.Fatal("failure was hidden")
 			}
 		})
+	}
+}
+
+func TestCorrectionRejectsChangedInputBeforeModelRequest(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var requests, closes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	cfg := config.Default()
+	cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
+	eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p := NewVoicePlugin()
+	if err := eng.LoadPlugin(p); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(eng.Stop)
+	p.sessionID = 7
+	p.correctionCapture = func() (*correction.Target, error) {
+		return &correction.Target{
+			Source:   correction.Source{ID: correction.CodexDesktopSourceID, Name: "Codex Desktop"},
+			Messages: []correction.Message{{Role: "user", Text: "当前项目"}},
+			Guard:    func() error { return errors.New("当前聊天已切换") },
+			Close:    func() { closes.Add(1) },
+		}, nil
+	}
+	var copied string
+	p.correctionClipboard = func(text string) error { copied = text; return nil }
+	p.outputTranscript(&recordingSession{sessionID: 7, correction: cfg.Correction}, "测试一下。")
+	if requests.Load() != 0 || closes.Load() != 1 {
+		t.Fatalf("requests=%d closes=%d; changed input must stop before the model call and release the binding", requests.Load(), closes.Load())
+	}
+	if copied != "测试一下。" || !strings.Contains(p.lastError, "未上屏") {
+		t.Fatal("changed input must report failure and preserve the raw transcript")
 	}
 }

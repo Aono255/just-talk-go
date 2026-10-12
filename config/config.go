@@ -62,7 +62,7 @@ func Default() *Config {
 	return &Config{
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
-			Language: "zh-CN", AutoSubmit: true, ResourceID: "volc.bigasr.sauc.duration",
+			Language: "zh-CN", AutoSubmit: true, ResourceID: DefaultASRResourceID,
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

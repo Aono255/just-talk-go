@@ -8,7 +8,7 @@ import (
 )
 
 func capturePlatform() (*Target, error) {
-	return nil, errors.New("当前 Codex 聊天读取暂只支持 macOS，未执行无上下文纠错")
+	return nil, errors.New("当前平台尚未接入上下文来源，未执行无上下文修正")
 }
 
 func focusHelperPlatform(io.Writer) error {

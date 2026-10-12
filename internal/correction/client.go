@@ -1,4 +1,4 @@
-// Package correction organizes voice transcripts with the current Codex conversation.
+// Package correction organizes voice transcripts with a bound conversation context.
 package correction
 
 import (
@@ -87,7 +87,7 @@ func Validate(cfg config.CorrectionConfig) error {
 
 func Recent(messages []Message) ([]Message, error) {
 	if len(messages) == 0 {
-		return nil, errors.New("没有读取到当前 Codex 聊天上下文")
+		return nil, errors.New("没有读取到当前会话上下文")
 	}
 	users, assistants := 0, 0
 	selected := make([]Message, 0, 9)

@@ -582,7 +582,7 @@ func (p *VoicePlugin) startRecording() {
 	asrCfg := ASRConfig{AppKey: vc.AppKey, AccessKey: vc.AccessKey, ResourceID: vc.ResourceID, Language: vc.Language, Hotwords: vc.Hotwords, BoostingTableID: vc.BoostingTableID}
 	asrCfg.Hotwords = correction.Hotwords(asrCfg.Hotwords, p.cfg.Correction)
 	if asrCfg.ResourceID == "" {
-		asrCfg.ResourceID = "volc.bigasr.sauc.duration"
+		asrCfg.ResourceID = config.DefaultASRResourceID
 	}
 	if asrCfg.Language == "" {
 		asrCfg.Language = "zh-CN"
@@ -1033,7 +1033,7 @@ func (p *VoicePlugin) publishStatusLocked() {
 	case p.recording:
 		state, detail = "recording", "录音中"
 	case len(p.correctionCancels) > 0:
-		state, detail = "correcting", "结合当前 Codex 聊天纠错整理"
+		state, detail = "correcting", "结合当前会话进行上下文修正"
 		stopping = true
 	case p.pendingDone > 0:
 		state, detail = "stopping", "正在停止并等待识别结果"
@@ -1156,7 +1156,7 @@ func shortError(err error) string {
 func asrConnectErrorDetail(err error) string {
 	msg := err.Error()
 	if strings.Contains(msg, "HTTP 401") || strings.Contains(msg, "HTTP 403") {
-		return "认证失败，请检查 App Key 或 Access Key。"
+		return "认证或服务权限不足，请检查 App Key、Access Key 及所选识别模型是否已开通。"
 	}
 	return shortError(err)
 }
