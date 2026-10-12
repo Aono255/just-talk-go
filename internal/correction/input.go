@@ -38,8 +38,12 @@ type Revision struct {
 	input             *Input
 	original, output  string
 	observed, stopped bool
-	revised           string
-	changedAt         time.Time
+	samples           []revisionSample
+}
+
+type revisionSample struct {
+	value string
+	at    time.Time
 }
 
 func NewRevision(input *Input, original, output string) *Revision {
@@ -55,22 +59,50 @@ func (r *Revision) Observe(value string, now time.Time) bool {
 	expected := r.input.Prefix + r.output + r.input.Suffix
 	if !r.observed {
 		r.observed = value == expected
-		return true
+		if !r.observed {
+			return true
+		}
 	}
 	if value == "" || !strings.HasPrefix(value, r.input.Prefix) || !strings.HasSuffix(value, r.input.Suffix) || len(value) < len(r.input.Prefix)+len(r.input.Suffix) {
 		return false
 	}
-	text := value[len(r.input.Prefix) : len(value)-len(r.input.Suffix)]
-	if text != r.revised {
-		r.revised, r.changedAt = text, now
+	r.samples = append(r.samples, revisionSample{value, now})
+	if len(r.samples) > 16 {
+		r.samples = r.samples[len(r.samples)-16:]
 	}
 	return true
 }
 
-func (r *Revision) Ready(now time.Time) bool {
+// Confirm uses a recent snapshot taken before the actual Enter event, never an
+// idle timer. current was freshly read from the same bound field; an empty
+// value is allowed because the application may already have handled Enter.
+func (r *Revision) Confirm(at time.Time, current string) *Feedback {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return !r.stopped && r.validLocked() && now.Sub(r.changedAt) >= 1500*time.Millisecond
+	if r.stopped || !r.observed {
+		return nil
+	}
+	r.stopped = true
+	for i := len(r.samples) - 1; i >= 0; i-- {
+		sample := r.samples[i]
+		if sample.at.After(at) {
+			continue
+		}
+		if at.Sub(sample.at) > 500*time.Millisecond || (current != "" && current != sample.value) {
+			return nil
+		}
+		text := sample.value[len(r.input.Prefix) : len(sample.value)-len(r.input.Suffix)]
+		if strings.TrimSpace(text) == "" || text == r.output {
+			return nil
+		}
+		for _, part := range []string{r.original, r.output, text} {
+			if utf8.RuneCountInString(part) > 2000 {
+				return nil
+			}
+		}
+		return &Feedback{Draft: r.original, Corrected: r.output, Revised: text}
+	}
+	return nil
 }
 
 func (r *Revision) Observed() bool {
@@ -79,27 +111,9 @@ func (r *Revision) Observed() bool {
 	return r.observed
 }
 
-func (r *Revision) validLocked() bool {
-	if !r.observed || strings.TrimSpace(r.revised) == "" || r.revised == r.output {
-		return false
-	}
-	for _, text := range []string{r.original, r.output, r.revised} {
-		if utf8.RuneCountInString(text) > 2000 {
-			return false
-		}
-	}
-	return true
-}
-
-func (r *Revision) Stop(keep bool) *Feedback {
+func (r *Revision) Stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.stopped {
-		return nil
-	}
 	r.stopped = true
-	if !keep || !r.validLocked() {
-		return nil
-	}
-	return &Feedback{Draft: r.original, Corrected: r.output, Revised: r.revised}
+	r.samples = nil
 }

@@ -5,6 +5,23 @@ import (
 	"time"
 )
 
+func TestPlainEnterDoesNotMatchModifiedEnter(t *testing.T) {
+	for mask := 0; mask < 16; mask++ {
+		tracker := NewKeyStateTracker()
+		combo := Combo{Key: KeyEnter}
+		tracker.Watch(combo, make(chan Event, 4))
+		for bit, key := range []KeyCode{KeyShift, KeyCtrl, KeyAlt, KeySuper} {
+			if mask&(1<<bit) != 0 {
+				tracker.KeyDown(key, time.Now())
+			}
+		}
+		events := tracker.KeyDown(KeyEnter, time.Now())
+		if (len(events) == 1) != (mask == 0) {
+			t.Fatalf("modifier mask %d: unexpected Enter events %v", mask, events)
+		}
+	}
+}
+
 func TestStandardComboKeyUpFiresWhenModifierReleasesFirst(t *testing.T) {
 	tracker := NewKeyStateTracker()
 	ch := make(chan Event, 4)

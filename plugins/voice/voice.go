@@ -297,6 +297,7 @@ type VoicePlugin struct {
 	learningEpoch                uint64
 	learningCommitMu             sync.Mutex
 	learningStopped              bool
+	learningHotkeyRegistered     bool
 	errorUntil                   time.Time
 	errorTimer                   *time.Timer
 	lastError                    string

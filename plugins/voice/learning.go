@@ -3,9 +3,11 @@ package voice
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/c/just-talk-go/config"
+	"github.com/c/just-talk-go/hotkey"
 	"github.com/c/just-talk-go/internal/correction"
 )
 
@@ -16,6 +18,26 @@ type learningWatch struct {
 	cfg      config.CorrectionConfig
 	hotwords []string
 	epoch    uint64
+	started  time.Time
+	confirm  chan time.Time
+}
+
+var confirmLearningCombo = hotkey.Combo{Key: hotkey.KeyEnter}
+
+func (p *VoicePlugin) onLearningEnter(evt hotkey.Event) {
+	if evt.Type != hotkey.KeyDown || evt.Combo != confirmLearningCombo {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	w := p.learningWatch
+	if w == nil || evt.Time.Before(w.started) {
+		return
+	}
+	select {
+	case w.confirm <- evt.Time:
+	default:
+	}
 }
 
 func sameLearningService(a, b config.CorrectionConfig) bool {
@@ -36,9 +58,15 @@ func (p *VoicePlugin) stopLearningLocked() {
 	}
 	p.learningContext = nil
 	if p.learningWatch != nil {
-		p.learningWatch.revision.Stop(false)
+		p.learningWatch.revision.Stop()
 		p.learningWatch.cancel()
 		p.learningWatch = nil
+	}
+	if p.learningHotkeyRegistered {
+		if err := p.env.UnregisterHotkey(confirmLearningCombo); err != nil {
+			p.logger.Warn("unregister learning Enter failed", "error", err)
+		}
+		p.learningHotkeyRegistered = false
 	}
 }
 
@@ -49,6 +77,15 @@ func (p *VoicePlugin) configureLearningLocked(cfg config.CorrectionConfig) {
 		p.stopLearningLocked()
 	}
 	if !p.learningStopped && p.learningContext == nil && correction.LearningReady(cfg) {
+		// Only macOS has readable input capture. Its existing event tap passes
+		// Enter through; do not register a grabbed Enter on other platforms.
+		if runtime.GOOS == "darwin" && !p.learningHotkeyRegistered {
+			if err := p.env.RegisterHotkeyWithOptions(confirmLearningCombo, hotkey.RegisterOptions{Suppress: false}, p.onLearningEnter); err != nil {
+				p.logger.Warn("register learning Enter failed", "error", err)
+				return
+			}
+			p.learningHotkeyRegistered = true
+		}
 		p.learningEpoch++
 		p.learningContext, p.learningCancel = context.WithCancel(p.env.Engine().Context())
 	}
@@ -75,15 +112,11 @@ func (p *VoicePlugin) flushLearning(sessionID uint64) {
 	}
 	watch := p.learningWatch
 	p.learningWatch = nil
-	var feedback *correction.Feedback
 	if watch != nil {
-		feedback = watch.revision.Stop(true)
+		watch.revision.Stop()
 		watch.cancel()
 	}
 	p.mu.Unlock()
-	if feedback != nil {
-		go p.learnRevision(watch, feedback)
-	}
 }
 
 func (p *VoicePlugin) startLearning(session *recordingSession, input *correction.Input, raw, output string) bool {
@@ -98,7 +131,8 @@ func (p *VoicePlugin) startLearning(session *recordingSession, input *correction
 	}
 	ctx, cancel := context.WithCancel(p.learningContext)
 	watch := &learningWatch{revision: correction.NewRevision(input, raw, output), cancel: cancel,
-		context: p.learningContext, cfg: session.correction, hotwords: session.hotwords, epoch: p.learningEpoch}
+		context: p.learningContext, cfg: session.correction, hotwords: session.hotwords, epoch: p.learningEpoch,
+		started: time.Now(), confirm: make(chan time.Time, 1)}
 	p.learningWatch = watch
 	p.mu.Unlock()
 	go p.watchRevision(ctx, watch, input)
@@ -108,49 +142,83 @@ func (p *VoicePlugin) startLearning(session *recordingSession, input *correction
 func (p *VoicePlugin) watchRevision(ctx context.Context, watch *learningWatch, input *correction.Input) {
 	defer input.Close()
 	defer watch.cancel()
+	defer watch.revision.Stop()
+	defer func() {
+		p.mu.Lock()
+		if p.learningWatch == watch {
+			p.learningWatch = nil
+		}
+		p.mu.Unlock()
+	}()
 	started := time.Now()
-	ticker := time.NewTicker(150 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	keep := true
+	confirm := func(at time.Time) {
+		// Recheck the same application/window/editor, even if Enter has already
+		// cleared its text. Never read another field or infer that sending worked.
+		value, err := input.Read()
+		if err != nil || ctx.Err() != nil {
+			return
+		}
+		if feedback := watch.revision.Confirm(at, value); feedback != nil {
+			p.learnRevision(watch, feedback)
+		}
+	}
 	for {
 		if ctx.Err() != nil {
-			keep = false
-			break
+			return
+		}
+		select {
+		case at := <-watch.confirm:
+			confirm(at)
+			return
+		default:
 		}
 		value, err := input.Read()
 		// A read already in flight when this watch was canceled must not be
 		// accepted as a revision of a later paste.
-		if ctx.Err() != nil {
-			keep = false
-			break
+		if ctx.Err() != nil || err != nil {
+			return
 		}
 		now := time.Now()
-		if err != nil || !watch.revision.Observe(value, now) {
-			break
+		select {
+		case at := <-watch.confirm:
+			confirm(at)
+			return
+		default:
 		}
-		if watch.revision.Ready(now) || now.Sub(started) >= 2*time.Minute {
-			break
+		if !watch.revision.Observe(value, now) {
+			// The app can clear before the pipe dispatcher delivers Enter. Wait
+			// briefly for that earlier event; clearing itself never confirms.
+			if value == "" {
+				timer := time.NewTimer(250 * time.Millisecond)
+				defer timer.Stop()
+				select {
+				case at := <-watch.confirm:
+					if !at.After(now) {
+						confirm(at)
+					}
+				case <-timer.C:
+				case <-ctx.Done():
+				}
+			}
+			return
+		}
+		if now.Sub(started) >= 10*time.Minute {
+			return
 		}
 		if !watch.revision.Observed() && now.Sub(started) >= time.Second {
-			keep = false
-			break
+			return
 		}
 		select {
 		case <-ctx.Done():
-			keep = false
+			return
+		case at := <-watch.confirm:
+			confirm(at)
+			return
 		case <-ticker.C:
 			continue
 		}
-		break
-	}
-	feedback := watch.revision.Stop(keep)
-	p.mu.Lock()
-	if p.learningWatch == watch {
-		p.learningWatch = nil
-	}
-	p.mu.Unlock()
-	if feedback != nil {
-		p.learnRevision(watch, feedback)
 	}
 }
 

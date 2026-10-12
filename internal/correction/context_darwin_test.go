@@ -45,6 +45,21 @@ int main(void) { @autoreleasepool {
     assert(messages.count==100);
     assert(userMessages(messages).count==6);
     assert([messages[0][@"text"] isEqual:@"message-5"]);
+    jt_correction_target target={0};
+    target.userAnchor=(AXUIElementRef)@{@"id":@"original"};
+    target.messages=@[@{@"role":@"user",@"text":@"private original"}];
+    NSArray *changed=@[@{@"role":@"user",@"text":@"private changed"}];
+    for (int identity=0;identity<3;identity++) for (int content=0;content<2;content++) {
+        AXUIElementRef anchor=identity==0?target.userAnchor:identity==1?(AXUIElementRef)@{@"id":@"recreated"}:NULL;
+        char *error=NULL;
+        BOOL matches=userBindingMatches(&target,anchor,content?changed:target.messages,&error);
+        assert(matches==(identity==0 && content==0));
+        if (!matches) {
+            assert(error && !strstr(error,"private") && !strstr(error,"切换"));
+            const char *reason=identity==2?"控件不可用":identity==0?"正文已变化，控件相同":content?"控件和正文均已变化":"控件已变化，正文相同";
+            assert(strstr(error,reason)); free(error);
+        }
+    }
 } return 0; }`
 	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
 		t.Fatal(err)
@@ -60,6 +75,64 @@ int main(void) { @autoreleasepool {
 	}
 	if output, err := exec.Command(binary).CombinedOutput(); err != nil {
 		t.Fatalf("native feedback binding failed: %v\n%s", err, output)
+	}
+}
+
+func TestNativeContextExcludesPeerClocksAndFollowingToolActivity(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "message-boundary.m")
+	program := `#import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
+#include <assert.h>
+static AXError copyNode(AXUIElementRef element,CFArrayRef keys,AXCopyMultipleAttributeOptions options,CFArrayRef *out) {
+    *out=(CFArrayRef)CFRetain(element);return kAXErrorSuccess;
+}
+#define AXUIElementCopyMultipleAttributeValues copyNode
+#include "context_darwin.m"
+static NSMutableArray *n(NSString *role,NSString *text,NSArray *children) {
+    return [NSMutableArray arrayWithArray:@[role,text,@"",@"",children]];
+}
+int main(void) { @autoreleasepool {
+    id heading=n(@"AXHeading",@"You said:",@[]);
+    id body=n(@"AXGroup",@"",@[n(@"AXStaticText",@"请在 12:34 检查 D01。",@[]),n(@"AXGroup",@"",@[n(@"AXStaticText",@"保留第二段与附件说明",@[])])]);
+    id clock=n(@"AXStaticText",@"02:01",@[]);
+    id tool=n(@"AXStaticText",@"运行了命令：private-tool-status",@[]);
+    id assistant=n(@"AXGroup",@"",@[n(@"AXHeading",@"ChatGPT said:",@[]),n(@"AXGroup",@"",@[n(@"AXStaticText",@"助手正文",@[])])]);
+    id latestHeading=n(@"AXHeading",@"你说：",@[]);
+    id latestBody=n(@"AXStaticText",@"最后一条用户正文",@[]);
+    id main=n(@"AXGroup",@"",@[heading,body,clock,n(@"AXGroup",@"",@[tool]),assistant,latestHeading,
+        n(@"AXStaticText",@"16:40",@[]),n(@"AXGroup",@"",@[latestBody])]);
+    id editor=n(@"AXTextArea",@"draft",@[]);
+    char *error=NULL; AXUIElementRef anchor=NULL;
+    NSArray *before=captureMessages((AXUIElementRef)main,(AXUIElementRef)editor,&anchor,&error);
+    assert(before && !error && before.count==3 && anchor==(AXUIElementRef)latestHeading);
+    assert([before[0][@"text"] isEqual:@"请在 12:34 检查 D01。\n保留第二段与附件说明"]);
+    assert([before[1][@"text"] isEqual:@"助手正文"]);
+    assert([before[2][@"text"] isEqual:@"最后一条用户正文"]);
+    clock[1]=@"02:02";tool[1]=@"another tool status";
+    NSArray *after=captureMessages((AXUIElementRef)main,(AXUIElementRef)editor,&anchor,&error);
+    assert([userMessages(before) isEqual:userMessages(after)] && !error);
+    jt_correction_target target={0};target.userAnchor=(AXUIElementRef)latestHeading;target.messages=userMessages(before);
+    assert(userBindingMatches(&target,anchor,userMessages(after),&error));
+    latestBody[1]=@"真正修改了用户消息";
+    after=captureMessages((AXUIElementRef)main,(AXUIElementRef)editor,&anchor,&error);
+    assert(!userBindingMatches(&target,anchor,userMessages(after),&error));
+    assert(error && strstr(error,"正文已变化"));free(error);
+} return 0; }`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	include, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "message-boundary")
+	cmd := exec.Command("xcrun", "--sdk", "macosx", "clang", "-x", "objective-c", "-I", include, source, "-framework", "AppKit", "-framework", "ApplicationServices", "-o", binary)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile boundary fixture: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(binary).CombinedOutput(); err != nil {
+		t.Fatalf("boundary fixture: %v\n%s", err, out)
 	}
 }
 

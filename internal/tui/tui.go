@@ -85,7 +85,7 @@ func New(cfg *config.Config) *Model {
 		{label: "火山热词表 ID", key: "boosting_table_id", help: "填写后识别使用云端词表；留空使用热词", fType: fString, input: ti(vc.BoostingTableID)},
 		{label: "AI 输入修正", key: "correction_enabled", help: "macOS 可读取输入框：共享术语和记忆纠错后上屏", fType: fToggle, boolVal: cc.Enabled},
 		{label: "上下文修正", key: "correction_context", help: "为 AI 修正补充聊天上下文；当前支持 Codex Desktop", fType: fToggle, boolVal: cc.Context},
-		{label: "输入自学习", key: "correction_learning", help: "从上屏后的用户修订学习；独立生效，需配置模型", fType: fToggle, boolVal: cc.Learning},
+		{label: "输入自学习", key: "correction_learning", help: "修订后单独 Enter 确认学习；需可读输入框和模型", fType: fToggle, boolVal: cc.Learning},
 		{label: "AI 纠错术语", key: "correction_terms", help: "逗号分隔；仅供纠错模型参考，不传给语音识别", fType: fString, input: ti(strings.Join(cc.Terms, ", "))},
 		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
 		{label: "模型服务地址", key: "correction_base_url", help: "OpenAI 兼容 Base URL，通常含 /v1", fType: fString, input: ti(cc.BaseURL)},

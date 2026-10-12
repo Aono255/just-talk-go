@@ -104,6 +104,8 @@ int main(void) {
         CHECK(read(fds[0], &got, sizeof(got)) == sizeof(got), "bridge event missing");
         CHECK(got.keycode == 0x3A && got.flags == test_flags(event) && got.event_type == i,
               "keyboard event payload changed");
+        int64_t unix_ms=(int64_t)((CFAbsoluteTimeGetCurrent()+kCFAbsoluteTimeIntervalSince1970)*1000.0);
+        CHECK(llabs(got.time_ms-unix_ms)<1000,"event timestamp must use Unix epoch for pre-Enter snapshots");
         CHECK(field_reads == 3, "keyboard fields must be read only for keyboard events");
     }
     close(fds[0]);

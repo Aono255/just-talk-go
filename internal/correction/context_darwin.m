@@ -273,7 +273,7 @@ static void flushMessage(NSMutableArray *messages, NSString *role, NSMutableArra
 
 static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUInteger *count,
                  NSTimeInterval deadline, NSMutableArray *messages, NSMutableArray *parts,
-                 NSString **currentRole, AXUIElementRef *lastUserHeading, char **error) {
+                 NSString **currentRole, int *headingDepth, AXUIElementRef *lastUserHeading, char **error) {
     if (depth>=60 || ++(*count)>18000 || [NSDate timeIntervalSinceReferenceDate]>deadline) {
         fail(error,@"当前聊天读取超过 2 秒或结构过大，未使用不完整上下文"); return NO;
     }
@@ -284,22 +284,31 @@ static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUIn
     if ([role isEqualToString:@"AXHeading"]) {
         NSString *next=headingRole(values,0,error); if (*error) return NO;
         if (next) {
-            flushMessage(messages,*currentRole,parts); *currentRole=next;
+            flushMessage(messages,*currentRole,parts); *currentRole=next; *headingDepth=depth;
             if ([next isEqualToString:@"user"]) *lastUserHeading=element;
             return YES;
         }
     }
     NSString *text=stringValue(values[1]);
+    // Codex exposes the message body inside groups below its role heading,
+    // but elapsed clocks as peer static text in the transcript list. A flat
+    // scan previously appended those clocks and later tool activity to the
+    // preceding user message. End at that structural boundary, not by matching
+    // clock-like text (a user's actual "12:34" must remain intact).
+    if ([*currentRole isEqual:@"user"] && [role isEqual:@"AXStaticText"] && depth<=*headingDepth) {
+        if (parts.count) { flushMessage(messages,*currentRole,parts); *currentRole=nil; }
+        return YES;
+    }
     if (*currentRole && [role isEqualToString:@"AXStaticText"] && text.length) [parts addObject:text];
-    for (id child in children(values)) if (!scan((AXUIElementRef)child,editor,depth+1,count,deadline,messages,parts,currentRole,lastUserHeading,error)) return NO;
+    for (id child in children(values)) if (!scan((AXUIElementRef)child,editor,depth+1,count,deadline,messages,parts,currentRole,headingDepth,lastUserHeading,error)) return NO;
     return YES;
 }
 
 static NSArray *captureMessages(AXUIElementRef main, AXUIElementRef editor, AXUIElementRef *lastUserHeading,
                                char **error) {
     NSMutableArray *messages=[NSMutableArray array],*parts=[NSMutableArray array];
-    NSUInteger count=0; NSString *role=nil;
-    if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,lastUserHeading,error)) return nil;
+    NSUInteger count=0; NSString *role=nil; int headingDepth=0;
+    if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,&headingDepth,lastUserHeading,error)) return nil;
     flushMessage(messages,role,parts);
     if (!messages.count) { fail(error,@"当前 Codex 聊天没有提供消息角色与正文，未执行无上下文纠错"); return nil; }
     return messages;
@@ -308,6 +317,21 @@ static NSArray *captureMessages(AXUIElementRef main, AXUIElementRef editor, AXUI
 static NSArray *userMessages(NSArray *messages) {
     NSArray *users=[messages filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"role == 'user'"]];
     return users.count>6 ? [users subarrayWithRange:NSMakeRange(users.count-6,6)] : users;
+}
+
+// AX object identity is a binding signal, not proof that the user switched
+// chats. Keep the existing guard, but report its actual observations separately.
+static BOOL userBindingMatches(jt_correction_target *target, AXUIElementRef anchor,
+                               NSArray *users, char **error) {
+    BOOL sameAnchor=anchor && CFEqual(anchor,target->userAnchor);
+    BOOL sameText=[users isEqual:target->messages];
+    if (sameAnchor && sameText) return YES;
+    NSString *reason=!anchor ? @"用户消息控件不可用" :
+        !sameAnchor && sameText ? @"用户消息控件已变化，正文相同" :
+        sameAnchor ? @"用户消息正文已变化，控件相同" : @"用户消息控件和正文均已变化";
+    fail(error,[NSString stringWithFormat:@"%@（消息数 %lu→%lu），无法确认同一聊天，结果未上屏",
+                reason,(unsigned long)target->messages.count,(unsigned long)users.count]);
+    return NO;
 }
 
 static AXUIElementRef mainAncestor(AXUIElementRef editor) {
@@ -375,10 +399,7 @@ int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **err
         NSArray *messages=captureMessages(main,editor,&userAnchor,error);
         if (!messages) return 0;
         // 助手流式回复可继续增长；绑定用户消息的 AX 身份与正文，避免写入切换后的聊天。
-        if (!userAnchor || !CFEqual(userAnchor,target->userAnchor) || ![userMessages(messages) isEqual:target->messages]) {
-            fail(error,@"纠错期间切换聊天或用户消息发生变化，结果未上屏"); return 0;
-        }
-        return 1;
+        return userBindingMatches(target,userAnchor,userMessages(messages),error) ? 1 : 0;
     }
 }
 

@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -117,8 +118,26 @@ func TestCrossApplicationRevisionLearnsAndReusesMemoryWithoutChat(t *testing.T) 
 				t.Fatal("unedited output generated memory")
 			}
 			inputMu.Lock()
+			value = "中间修改，尚未完成。"
+			inputMu.Unlock()
+			time.Sleep(1700 * time.Millisecond)
+			if learned.Load() != 0 {
+				t.Fatal("idle pause created memory")
+			}
+			p.onLearningEnter(hotkey.Event{Combo: hotkey.Combo{Mods: hotkey.ModShift, Key: hotkey.KeyEnter}, Type: hotkey.KeyDown, Time: time.Now()})
+			if learned.Load() != 0 {
+				t.Fatal("Shift Enter created memory")
+			}
+			inputMu.Lock()
 			value = "使用 D01。"
 			inputMu.Unlock()
+			time.Sleep(120 * time.Millisecond)
+			at := time.Now()
+			// Model an application clearing immediately before event dispatch.
+			inputMu.Lock()
+			value = ""
+			inputMu.Unlock()
+			p.onLearningEnter(hotkey.Event{Combo: confirmLearningCombo, Type: hotkey.KeyDown, Time: at})
 			waitLearning(t, func() bool {
 				notes, err := correction.LoadMemory(CorrectionMemoryPath())
 				return err == nil && len(notes) == 1 && notes[0] == note
@@ -162,8 +181,52 @@ func TestProgrammaticPasteCannotBecomePriorInputRevision(t *testing.T) {
 	if err := p.pasteTranscript("D01", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if r.Stop(true) != nil || p.learningWatch != nil {
+	if r.Confirm(time.Now(), "D01") != nil || p.learningWatch != nil {
 		t.Fatal("old revision survived the next paste")
+	}
+}
+
+func TestLearningEnterRejectsModifiersOldEventsAndKeyUp(t *testing.T) {
+	p := NewVoicePlugin()
+	now := time.Now()
+	w := &learningWatch{started: now, confirm: make(chan time.Time, 1)}
+	p.learningWatch = w
+	for _, mods := range []hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl, hotkey.ModAlt, hotkey.ModSuper} {
+		p.onLearningEnter(hotkey.Event{Combo: hotkey.Combo{Key: hotkey.KeyEnter, Mods: mods}, Type: hotkey.KeyDown, Time: now})
+	}
+	p.onLearningEnter(hotkey.Event{Combo: confirmLearningCombo, Type: hotkey.KeyUp, Time: now})
+	p.onLearningEnter(hotkey.Event{Combo: confirmLearningCombo, Type: hotkey.KeyDown, Time: now.Add(-time.Second)})
+	if len(w.confirm) != 0 {
+		t.Fatal("invalid confirmation accepted")
+	}
+	p.onLearningEnter(hotkey.Event{Combo: confirmLearningCombo, Type: hotkey.KeyDown, Time: now})
+	if len(w.confirm) != 1 {
+		t.Fatal("plain Enter missing")
+	}
+}
+
+func TestAbandonedOrClearedRevisionNeverStartsLearning(t *testing.T) {
+	for _, lostFocus := range []bool{false, true} {
+		p := NewVoicePlugin()
+		ctx, cancel := context.WithCancel(context.Background())
+		r := correction.NewRevision(&correction.Input{}, "P01", "P01")
+		r.Observe("P01", time.Now())
+		r.Observe("D01", time.Now())
+		w := &learningWatch{revision: r, cancel: cancel, context: ctx, confirm: make(chan time.Time, 1)}
+		p.learningWatch = w
+		closed := false
+		input := &correction.Input{Read: func() (string, error) {
+			if lostFocus {
+				return "", errors.New("focus changed")
+			}
+			return "", nil
+		}, Close: func() { closed = true }}
+		// No model environment is installed: any accidental learning call is
+		// a test failure instead of making a network request.
+		p.watchRevision(ctx, w, input)
+		if !closed || p.learningWatch != nil || r.Confirm(time.Now(), "D01") != nil {
+			t.Fatal("abandoned revision survived")
+		}
 	}
 }
 

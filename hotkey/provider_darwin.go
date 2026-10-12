@@ -66,7 +66,7 @@ package hotkey
 // 	}
 // 	evt.keycode  = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 // 	evt.flags    = (uint64_t)CGEventGetFlags(event);
-// 	evt.time_ms  = (int64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
+// 	evt.time_ms  = (int64_t)((CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970) * 1000.0);
 // 	bridge_send(&evt);
 // 	return event;
 // }
@@ -405,6 +405,11 @@ func (p *darwinProvider) handleCGEvent() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, e := range events {
+		// Use flags from this native event for Enter confirmation, even if a
+		// modifier transition was missed by the generic key-state tracker.
+		if e.Combo == (Combo{Key: KeyEnter}) && mods != ModNone {
+			continue
+		}
 		if ch, ok := p.channels[e.Combo]; ok {
 			select {
 			case ch <- e:
