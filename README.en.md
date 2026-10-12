@@ -14,16 +14,17 @@ This [fork maintained by Aono255](https://github.com/Aono255/just-talk-go) is ba
 | --- | --- |
 | Global voice input | `toggle`: press to start, press again to stop; `hold`: hold to record and release to stop |
 | Streaming recognition and paste | Doubao 1.0 / 2.0 with duration or concurrency resources; automatic paste or clipboard-only output. Automatic paste does not press Enter to send a message |
-| Context correction | **Disabled by default; currently only macOS Codex Desktop is connected**. Reads the bound conversation, then corrects with DeepSeek or an OpenAI-compatible service |
+| AI input correction | Disabled by default; macOS app/window-bound output shares terms and memory, using DeepSeek or an OpenAI-compatible service |
+| Chat context | Optional extra context for AI input correction; currently Codex Desktop only |
 | Independent AI glossary | Project names, technical terms and abbreviations for the correction model, maintained separately from recognition hotwords |
-| Correction learning | Learns terminology repairs and writing preferences from confirmed sent messages; only compact references are stored locally |
+| Input learning | Learns from user revisions to this dictation’s pasted span; independent of chat adapters and sending |
 | Local and cloud recognition hotwords | Inline hotwords or a Volcengine self-learning hotword table ID; cloud tables must be bound in the client |
 | Chinese recording overlay | On macOS: audio level, transcript preview, AI animation, completion result and visible change highlighting |
 | TUI settings and statistics | Scrolling configuration, help and logs, save/reload, session count, total characters and average/recent speed |
 | Cancel and record again | Escape cancels the current flow; `R` starts a new recording while an error is displayed |
 | Installation and diagnostics | macOS Homebrew, release archives for three platforms, environment checks and context source/input binding checks |
 
-With “上下文修正” enabled, **other applications such as WeChat still use ordinary voice input**, without reading Codex conversations or calling the correction model. The switch can stay enabled. Linux and Windows support basic voice input; Codex context correction is currently unavailable there.
+AI input correction, chat context and learning have separate switches. Generic macOS output checks the same frontmost application and window; readable editable inputs additionally check text and selection and can learn user revisions. An app without readable inputs can still use AI correction, but the program cannot detect a chat/input switch inside the same window or learn those revisions. Interface probes on both local WeChat 4.1.9 copies returned only window controls. The trial therefore uses window-bound correction with shared memory; live end-to-end paste still needs trial verification. Linux and Windows retain basic voice input. Terminal CLI conversation context is not connected, and terminal history is not read.
 
 Native macOS overlay examples, using demonstration text:
 
@@ -124,18 +125,18 @@ Option maps to Alt; Command/Cmd/Win map to Super. Windows modifier combinations 
 
 ## Context correction (macOS)
 
-The shared context entry identifies the input application and selects a unique matching adapter. **Only macOS Codex Desktop is enabled currently**. OMP Desktop, Codex CLI and OMP CLI remain unimplemented and use ordinary voice input on macOS. Context capture, model correction, input checks, output and learning share one pipeline. `[correction].enabled`, existing model keys, terms and memories remain unchanged.
+`[correction].enabled` controls AI input correction with shared model settings, terms and memory. `context` enables additional chat context and defaults to true when absent in existing configurations. Only Codex Desktop has a chat adapter; OMP and terminal sessions remain unimplemented. Generic apps use independent window and input bindings, and learning no longer retains conversation resources or depends on a context source ID.
 
 ### Configure DeepSeek or another model
 
 Correction is disabled by default and reuses the recording hotkey when enabled:
 
 ```text
-Supported client: record → ASR → select context source → capture bound conversation → model correction → input checks → paste or copy
-Other applications: record → ASR → paste or copy
+App window or connected client: record → ASR → terms/memory + optional chat context → model correction → target checks → paste or copy
+After paste: observe this exact output → user revision in the same input → background extraction → compact shared memory
 ```
 
-Fill these TUI settings, then enable “上下文修正” and save:
+Configure the model, enable “AI 输入修正”, and save. Enable chat context and input learning as needed:
 
 | TUI setting | DeepSeek default or purpose |
 | --- | --- |
@@ -145,7 +146,8 @@ Fill these TUI settings, then enable “上下文修正” and save:
 | 模型 API Key | Enter the service's key locally; masked while viewing and editing |
 | 纠错超时(ms) | `8000` by default; allowed range `500`–`30000` |
 | AI 纠错术语 | English or Chinese comma separators, e.g. `Codex, DeepSeek, SOCKS5, WebShell, ClickHouse` |
-| 纠错自学习 | Enabled by default; only active with context correction, and can be switched off and saved |
+| 上下文修正 | Enabled by default; adds chat context from a connected client when AI correction is enabled |
+| 输入自学习 | Enabled by default; independently active with valid model configuration, even when AI correction or chat context is off |
 
 DeepSeek mode explicitly disables thinking and enables JSON output; see the [official API reference](https://api-docs.deepseek.com/api/create-chat-completion/). Other services must support `POST /chat/completions`, Bearer authentication and `choices[].message.content`, returning the expected JSON text. Just Talk sends HTTP requests directly and reuses connections, without starting Codex CLI, automatically switching models, or retrying against another service.
 
@@ -185,19 +187,19 @@ Service errors, timeouts, validation failures or target changes preserve the raw
 
 ### Add a context source
 
-The shared entry is `internal/correction/context.go`; macOS registration is in `context_darwin.go`, and Codex Desktop capture/binding checks are isolated in `context_codex_darwin.go`. Each adapter supplies a unique source ID, application matching and a `Target` containing messages, an input guard, resource cleanup and an optional sent-feedback reader. Model calls use ordinary `user` / `assistant` messages independently of native client APIs.
+The shared entry is `internal/correction/context.go`; macOS registration is in `context_darwin.go`, and Codex Desktop capture/binding checks are isolated in `context_codex_darwin.go`. Each adapter supplies a unique source ID, application matching and a `Target` containing messages, an input guard, resource cleanup. Model calls use ordinary `user` / `assistant` messages independently of native client APIs.
 
-Unmatched clients keep ordinary voice input. Ambiguous matching, failed capture or incomplete bindings stop corrected paste with an explicit error. Bindings are checked before model calls and output. Learning checks source identity before the adapter verifies a message sent in the same conversation. Future terminal adapters must verify active tabs/panes, CLI sessions, message roles and input bindings before registration; these clients are not enabled yet.
+Unmatched chat clients use explicit input-only correction without reading another app’s chat. Failure from a matched context source still stops correction. Bindings are checked before model calls and output; generic output checks the frontmost PID and window, with focus, original value and selection checks when the input is readable. Learning uses independent input bindings, without chat source IDs or sent-message anchors. Future terminal adapters must verify active tabs/panes, CLI sessions, message roles and input bindings before registration; their context adapters are not enabled yet.
 
 ### Using correction learning
 
-1. Keep context correction and learning enabled. Edit the corrected draft as needed, then send it manually.
-2. Within 30 minutes, dictate again in the same client and conversation. The program checks the previous main region, input field and user-message anchor, then selects the first actual user message sent after that anchor.
-3. The previous raw transcript, AI result and sent text are included as feedback in this correction request. Reusable terminology or writing preferences proposed by the model are saved after the current result is successfully delivered.
+1. Configure a valid model and enable “输入自学习” plus automatic paste. AI correction and chat context can be switched independently.
+2. Edit the dictated text in its original field. Tracking starts only after the exact pasted span is observed; pre-existing prefixes and suffixes are excluded from the sample.
+3. After a revision is stable for about 1.5 seconds, one separate background model request extracts memory. Sending is not required, and learning does not delay the completed paste.
 
-Learning makes no extra model request and does not continuously monitor conversations. Unsent drafts, different context sources, changed conversations, edited older messages or unmatched anchors produce no feedback. A sent-feedback reader is never called with another client’s binding. Each raw/corrected/sent text is limited to 2,000 characters; larger samples skip learning while correction continues. Disabling learning, quitting, or dictating additional segments without sending discards the previous pending sample.
+Each paste can produce at most one learning request. Only the bound input is observed, for up to two minutes. Losing focus, clearing it or starting the next paste ends observation; already observed valid revisions may still be learned. Disabling learning, quitting or changing model service settings cancels work and prevents stale responses from committing. Untouched model output, unconfirmed paste and clipboard-only output do not create memory. The program does not infer successful sending or read chat history for learning. Raw/output/revised samples are limited to 2,000 characters each; input snapshots to 4,096 UTF-16 code units.
 
-At most 32 compact notes of 120 characters each are stored, without full edit samples or conversation text, in `~/.local/state/just-talk/correction-memory.json`, or `just-talk` under `XDG_STATE_HOME` when set. Later Codex conversations reuse these references; the prompt prioritizes current context when it conflicts with memory. This supplies references to requests rather than training model weights. Learning failures are reported without blocking the corrected result.
+At most 32 notes of 120 characters each are stored locally, without full samples or chat text, in `~/.local/state/just-talk/correction-memory.json` or `just-talk` under `XDG_STATE_HOME`. All AI-corrected applications can reuse these references; current context takes priority. This does not train model weights. Disabling input learning also excludes memory from correction requests. Learning failure does not block the current output.
 
 ```bash
 just-talk --show-correction-memory
@@ -281,7 +283,8 @@ language = "zh-CN"                     # Retained field; see note below
 
 [correction]
 enabled = false
-learning = true                       # Learning, active only with context correction
+context = true                        # Add chat context from a connected client
+learning = true                       # Independent input revision learning; requires a configured model
 provider = "deepseek"                  # Or openai-compatible
 base_url = "https://api.deepseek.com"
 model = "deepseek-flash"
@@ -316,6 +319,7 @@ hotkeys = []
 | `just-talk --backend wayland` / `--backend x11` | Force a Linux backend; also supports `JUST_TALK_BACKEND` |
 | `just-talk --install` | Install this binary into Linux/macOS `~/.local/bin` or Windows `%LOCALAPPDATA%\Programs\Just Talk` |
 | `just-talk --show-correction-memory` | Show compact local correction memories without recording, networking or reading configuration |
+| `just-talk --check-input` | Check the focused editable input after five seconds; no chat history, network or saved text |
 | `just-talk --clear-correction-memory` | Quit the running program first, then clear learned memories without changing hotwords, glossary or keys |
 
 Additional hotkey event logging without the TUI requires both `--debug` and `[debug].enabled = true`; `debug.hotkeys` selects the combinations to observe.
@@ -326,7 +330,7 @@ Logs are `/tmp/just-talk.log` on Linux/macOS and `%LOCALAPPDATA%\just-talk\just-
 
 ### DeepSeek enabled, but WeChat asks for a Codex draft
 
-Confirm `just-talk --version` is at least `v0.1.9`, exit the old process, and restart. The updated implementation queries the current frontmost application in a one-shot helper process, allowing ordinary voice input in other applications. If the error occurs inside Codex, focus the current conversation draft before recording.
+Confirm the current version is running, exit the old process, and restart. A one-shot helper identifies the actual frontmost application. Apps without a chat adapter use independent window binding and can still use AI input correction. Inside Codex, focus the current conversation draft. “本次不采集修订” means the input is unreadable; it does not prevent correction and window-checked paste.
 
 The system-wide AX focus query used in `v0.1.8` returned `-25204` immediately on an authorized device even with a longer timeout, producing an application-detection failure. From `v0.1.9`, a separate process queries AppKit application identity without reading configuration, conversation text or microphone input. Helper failure or a 2-second timeout still prevents paste. The main process retains Codex input/chat binding checks and rechecks application identity before paste. Failures are logged to distinguish application detection from conversation access problems.
 
@@ -360,7 +364,7 @@ The overlay has a two-line preview; full text is still pasted or copied. AI corr
 
 ### Where is my content sent
 
-Audio goes to Volcengine ASR. When context correction is enabled and a connected source matches, the transcript, selected conversation context, local hotwords and AI terms go to the configured model service. Currently, the only connected source is Codex Desktop. Learning also includes compact local references and confirmed previous raw/corrected/sent feedback. Full feedback is used in memory and that request; only extracted notes are stored locally. The model key stays in local configuration and is used for request authentication, without being written to logs. ASR and correction use separate credentials.
+Audio goes to Volcengine ASR. AI input correction sends the transcript, hotwords, terms and enabled shared memory to the configured model. Additional chat context is supplied only when enabled and a connected source matches, currently Codex Desktop. Independent learning sends the raw transcript, observed pasted text and user revision, plus terms and memory, without chat history. Full samples remain in memory and the request; only compact extracted notes are saved locally. The model key stays in local configuration and is used for request authentication, without being written to logs. ASR and correction use separate credentials.
 
 ## Build and maintenance
 

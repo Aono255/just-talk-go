@@ -40,6 +40,7 @@ func main() {
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
 	checkCodexContext := flag.Bool("check-codex-context", false, "wait 5 seconds, then check focused Codex context without recording or sending text")
 	checkContext := flag.Bool("check-context", false, "wait 5 seconds, then check the current context source and input binding without recording or networking")
+	checkInput := flag.Bool("check-input", false, "wait 5 seconds, then check the focused editable input without reading chat history or networking")
 	installOnly := flag.Bool("install", false, "install just-talk for the current user")
 	focusHelper := flag.Bool("focus-helper", false, "internal: query frontmost application once")
 	showMemory := flag.Bool("show-correction-memory", false, "show locally learned correction references")
@@ -53,6 +54,23 @@ func main() {
 			fmt.Fprintf(os.Stderr, "input application helper: %s\n", err)
 			os.Exit(1)
 		}
+		return
+	}
+	if *checkInput {
+		fmt.Println("请在 5 秒内回到目标应用并点击输入框。仅检查输入框可读性与绑定，不读取聊天历史、不录音、不联网、不保存文字。")
+		time.Sleep(5 * time.Second)
+		started := time.Now()
+		input, err := correction.CaptureInput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "输入框检查失败: %s\n", err)
+			os.Exit(1)
+		}
+		defer input.Close()
+		if err := input.Guard(); err != nil {
+			fmt.Fprintf(os.Stderr, "输入框绑定失败: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("输入框检查成功：类型 %s，可读取和绑定；现有文字 %d 字符，耗时 %dms。\n", input.Role, len([]rune(input.Before)), time.Since(started).Milliseconds())
 		return
 	}
 	if *checkCodexContext || *checkContext {
@@ -98,7 +116,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "清空自学习记忆失败:", err)
 				os.Exit(1)
 			}
-			fmt.Println("已清空纠错自学习记忆；AI 术语、热词和配置保持原样。")
+			fmt.Println("已清空输入自学习记忆；AI 术语、热词和配置保持原样。")
 			return
 		}
 		notes, err := correction.LoadMemory(path)
@@ -106,7 +124,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "读取自学习记忆失败:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("纠错自学习记忆 %d 条：\n", len(notes))
+		fmt.Printf("输入自学习记忆 %d 条：\n", len(notes))
 		for i, note := range notes {
 			fmt.Printf("%d. %s\n", i+1, note)
 		}

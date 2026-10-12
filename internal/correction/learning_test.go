@@ -1,6 +1,11 @@
 package correction
 
 import (
+	"context"
+	"encoding/json"
+	"github.com/c/just-talk-go/config"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -62,25 +67,36 @@ func TestConcurrentMemoryCommitsMergeInsteadOfOverwritingEarlierNotes(t *testing
 	}
 }
 
-func TestLearningUpdatesRequireConfirmedFeedbackAndNeverBlockTextRepairs(t *testing.T) {
-	response := `{"corrected_text":"使用 D01。","memory_updates":["在该平台语境中，P01 应还原为 D01"]}`
-	learning := &Learning{}
-	text, err := CheckResult("使用 P01。", response, nil, learning)
-	if err != nil || text != "使用 D01。" || len(learning.Updates) != 0 {
-		t.Fatal("unsubmitted output created a memory or content repair was blocked")
+func TestRevisionLearningIsIndependentOfContextAndCorrection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct{ Messages []struct{ Content string } }
+		if json.NewDecoder(r.Body).Decode(&request) != nil || len(request.Messages) != 2 {
+			t.Error("invalid request")
+			w.WriteHeader(400)
+			return
+		}
+		var data map[string]json.RawMessage
+		if json.Unmarshal([]byte(request.Messages[1].Content), &data) != nil {
+			t.Error("invalid data")
+		}
+		if _, ok := data["context"]; ok {
+			t.Error("learning read chat history")
+		}
+		var feedback Feedback
+		if json.Unmarshal(data["feedback"], &feedback) != nil || feedback.Revised != "使用 D01。" {
+			t.Error("missing actual input revision")
+		}
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]string{"content": `{"memory_updates":["该平台语境中的 P01 应为 D01"]}`}}}})
+	}))
+	defer server.Close()
+	cfg := config.CorrectionConfig{Learning: true, Provider: "openai-compatible", BaseURL: server.URL, Model: "test", APIKey: "test-only", TimeoutMS: 1000}
+	notes, err := Learn(context.Background(), cfg, &Feedback{Draft: "使用 P01。", Corrected: "使用 P01。", Revised: "使用 D01。"}, nil, nil)
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("independent learning failed: %v", err)
 	}
-	learning.Feedback = &Feedback{Draft: "P01", Corrected: "P01", Submitted: "D01"}
-	text, err = CheckResult("使用 P01。", response, nil, learning)
-	if err != nil || text != "使用 D01。" || len(learning.Updates) != 1 {
-		t.Fatal("confirmed feedback did not produce a proposed memory")
-	}
-	learning.Feedback = nil
-	if _, err := CheckResult("使用 P01。", response, nil, learning); err != nil || len(learning.Updates) != 0 {
-		t.Fatal("previous updates survived without confirmed feedback")
-	}
-	learning.Feedback = &Feedback{Submitted: "D01"}
-	text, err = CheckResult("P01", `{"corrected_text":"D01","memory_updates":42}`, nil, learning)
-	if err != nil || text != "D01" || learning.Error == nil || len(learning.Updates) != 0 {
-		t.Fatal("invalid optional learning response blocked correction or was hidden")
+	for _, feedback := range []*Feedback{nil, {Draft: "P01", Corrected: "D01", Revised: "D01"}} {
+		if _, err := Learn(context.Background(), cfg, feedback, nil, nil); err == nil {
+			t.Fatal("model-only output was treated as user revision")
+		}
 	}
 }

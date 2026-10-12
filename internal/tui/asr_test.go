@@ -40,7 +40,7 @@ func TestASRSelectionSavesModelAndPreservesExistingResources(t *testing.T) {
 				if field.key == "resource_id" {
 					field.optIdx = idxOf(field.opts, "volc.seedasr.sauc.concurrent")
 				}
-				if field.key == "correction_enabled" && field.label != "上下文修正" {
+				if field.key == "correction_context" && field.label != "上下文修正" {
 					t.Fatal("context correction is still client-specific in settings")
 				}
 			}

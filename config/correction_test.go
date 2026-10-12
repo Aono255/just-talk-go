@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+func TestExistingConfigDefaultsChatContextAndPersistsIndependentSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.toml")
+	if err := os.WriteFile(path, []byte("[correction]\nenabled=true\nlearning=false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || !cfg.Correction.Enabled || !cfg.Correction.Context || cfg.Correction.Learning {
+		t.Fatal("existing configuration defaults changed")
+	}
+	cfg.Correction.Context = false
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil || !loaded.Correction.Enabled || loaded.Correction.Context || loaded.Correction.Learning {
+		t.Fatal("independent context setting was not preserved")
+	}
+}
+
 func TestExplicitConfigSaveKeepsPathAndPrivatePermissions(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if err := os.WriteFile("config.toml", []byte("[voice]\napp_key='unchanged'\n"), 0600); err != nil {

@@ -247,7 +247,7 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
     if ([label isEqualToString:@"FIX"]) {
         NSRect badge=NSMakeRect(rect.size.width-89*scale,15*scale,69*scale,23*scale);
         [jt_rgb(157,133,245,0.13) setFill]; [[NSBezierPath bezierPathWithRoundedRect:badge xRadius:7*scale yRadius:7*scale] fill];
-        jt_text(@"上下文纠错",NSInsetRect(badge,8*scale,4*scale),10*scale,jt_rgb(194,177,255,1),NSFontWeightMedium);
+        jt_text(@"智能纠错",NSInsetRect(badge,8*scale,4*scale),10*scale,jt_rgb(194,177,255,1),NSFontWeightMedium);
     }
     NSMutableAttributedString *body=[[[NSMutableAttributedString alloc] initWithString:caption attributes:[self bodyAttributes]] autorelease];
     if ([label isEqualToString:@"FIX"]) [body addAttribute:NSForegroundColorAttributeName value:jt_rgb(187,181,207,1) range:NSMakeRange(0,body.length)];

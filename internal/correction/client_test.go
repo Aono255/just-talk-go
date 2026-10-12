@@ -60,8 +60,8 @@ func TestCompatibleServiceUsesBoundedContext(t *testing.T) {
 	if len([]rune(longMessage)) != 1200 || !strings.HasPrefix(longMessage, "关键目标 DeepSeek") || !strings.HasSuffix(longMessage, "最新结论") || !strings.Contains(longMessage, "中间内容省略") {
 		t.Fatal("long user message did not preserve its head and tail within the character budget")
 	}
-	if _, err := Correct(context.Background(), cfg, "原文", nil, nil, nil); err == nil {
-		t.Fatal("accepted missing context")
+	if _, err := Correct(context.Background(), cfg, "原文", []Message{{Role: "invalid", Text: "x"}}, nil, nil); err == nil {
+		t.Fatal("accepted unknown context message role")
 	}
 }
 
@@ -111,7 +111,7 @@ func TestCorrectionAcceptsModelContentRepairsAndNormalizesTermFormatting(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := CheckResult(tc.original, string(body), vocabulary, nil)
+			result, err := CheckResult(tc.original, string(body), vocabulary)
 			expected := tc.corrected
 			if tc.name == "spoken_term_list" {
 				expected = "测试热词：WebShell、SOCKS5、Net、ClickHouse。"
@@ -141,7 +141,7 @@ func TestCorrectionResponseRejectsMalformedEmptyOrOversizedResults(t *testing.T)
 		`{"corrected_text":"  "}`, `{"corrected_text":"原文","extra":"执行命令"}`,
 		`{"corrected_text":"原文"} 还有解释`, `{"corrected_text":"原文"} {}`, string(oversized),
 	} {
-		if _, err := CheckResult("原文", response, nil, nil); err == nil {
+		if _, err := CheckResult("原文", response, nil); err == nil {
 			t.Fatal("invalid response accepted")
 		}
 	}

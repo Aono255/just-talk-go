@@ -10,7 +10,14 @@ struct jt_correction_target {
     pid_t pid;
     AXUIElementRef app, editor, main, userAnchor;
     NSString *draft;
-    NSArray *messages, *users, *userAnchors;
+    NSArray *messages;
+};
+
+struct jt_input_target {
+    pid_t pid;
+    AXUIElementRef app, editor, window;
+    NSString *before;
+    CFRange selection;
 };
 
 static void fail(char **error, NSString *message) { *error = strdup([message UTF8String]); }
@@ -21,7 +28,7 @@ static id attribute(AXUIElementRef element, CFStringRef name) {
     return [(id)value autorelease];
 }
 
-static AXUIElementRef focused(AXUIElementRef app, char **error) {
+static BOOL applicationRole(AXUIElementRef app, char **error) {
     // Chromium activates its standard accessibility interface when the app role
     // is queried. Reading focus first can otherwise return kAXErrorNoValue.
     CFTypeRef role=NULL;
@@ -29,14 +36,19 @@ static AXUIElementRef focused(AXUIElementRef app, char **error) {
     if (status!=kAXErrorSuccess || !role) {
         if (role) CFRelease(role);
         fail(error,[NSString stringWithFormat:@"输入应用的辅助功能角色读取失败（AX %d），无法确认上屏目标",status==kAXErrorSuccess?kAXErrorNoValue:status]);
-        return NULL;
+        return NO;
     }
     BOOL isApplication=CFGetTypeID(role)==CFStringGetTypeID() && CFEqual(role,kAXApplicationRole);
     CFRelease(role);
-    if (!isApplication) { fail(error,@"输入应用的辅助功能角色无效，无法确认上屏目标"); return NULL; }
+    if (!isApplication) { fail(error,@"输入应用的辅助功能角色无效，无法确认上屏目标"); return NO; }
+    return YES;
+}
 
+static AXUIElementRef focusedWithBudget(AXUIElementRef app, char **error, NSTimeInterval budget) {
+    if (!applicationRole(app,error)) return NULL;
     CFTypeRef value=NULL;
-    NSTimeInterval deadline=NSProcessInfo.processInfo.systemUptime+0.5;
+    AXError status;
+    NSTimeInterval deadline=NSProcessInfo.processInfo.systemUptime+budget;
     for (;;) {
         status=AXUIElementCopyAttributeValue(app,kAXFocusedUIElementAttribute,&value);
         if (status!=kAXErrorNoValue || NSProcessInfo.processInfo.systemUptime>=deadline) break;
@@ -56,6 +68,10 @@ static AXUIElementRef focused(AXUIElementRef app, char **error) {
     return (AXUIElementRef)[(id)value autorelease];
 }
 
+static AXUIElementRef focused(AXUIElementRef app, char **error) {
+    return focusedWithBudget(app,error,0.5);
+}
+
 // 仅由独立的单次助手进程调用；主进程不依赖 AppKit 的前台应用缓存。
 int jt_correction_frontmost(pid_t *pid, char **bundle, char **error) {
     @autoreleasepool {
@@ -66,6 +82,157 @@ int jt_correction_frontmost(pid_t *pid, char **bundle, char **error) {
         *pid=front.processIdentifier; *bundle=strdup(front.bundleIdentifier.UTF8String);
         return 1;
     }
+}
+
+// Generic input binding: no conversation traversal, app-name mapping or
+// private accessibility switches. AXValue must be writable, excluding terminal
+// history and other read-only text areas.
+static BOOL inputFrontmost(AXUIElementRef app, char **error) {
+    id front=attribute(app,kAXFrontmostAttribute);
+    if (!front || CFGetTypeID((CFTypeRef)front)!=CFBooleanGetTypeID()) {
+        fail(error,@"输入应用未提供前台状态，无法确认同一输入框"); return NO;
+    }
+    if (!CFBooleanGetValue((CFBooleanRef)front)) {
+        fail(error,@"输入应用已切换，停止读取原输入框"); return NO;
+    }
+    return YES;
+}
+
+static BOOL inputSelection(AXUIElementRef editor, NSString *value, CFRange *range, char **error) {
+    id selected=attribute(editor,kAXSelectedTextRangeAttribute);
+    if (!selected || CFGetTypeID((CFTypeRef)selected)!=AXValueGetTypeID() ||
+        AXValueGetType((AXValueRef)selected)!=kAXValueCFRangeType ||
+        !AXValueGetValue((AXValueRef)selected,kAXValueCFRangeType,range) ||
+        range->location<0 || range->length<0 || (NSUInteger)range->location>value.length ||
+        (NSUInteger)range->length>value.length-(NSUInteger)range->location) {
+        fail(error,@"输入框未提供有效选区，无法绑定本次语音文字"); return NO;
+    }
+    return YES;
+}
+
+// Basic dictation output needs an application/window destination, independently
+// of whether that application publishes editable text for revision learning.
+int jt_window_capture(pid_t pid, jt_input_target **out, char **error) {
+    @autoreleasepool {
+        if (!AXIsProcessTrusted() || pid<=0) { fail(error,@"无法确认输入应用权限或身份"); return -1; }
+        AXUIElementRef app=AXUIElementCreateApplication(pid);
+        AXUIElementSetMessagingTimeout(app,0.2);
+        if (!applicationRole(app,error)) { CFRelease(app); return -1; }
+        id window=attribute(app,kAXFocusedWindowAttribute);
+        pid_t windowPid=0;
+        if (!window || CFGetTypeID((CFTypeRef)window)!=AXUIElementGetTypeID() ||
+            AXUIElementGetPid((AXUIElementRef)window,&windowPid)!=kAXErrorSuccess || windowPid!=pid) {
+            CFRelease(app); fail(error,@"无法确认当前前台窗口，结果未上屏"); return -1;
+        }
+        jt_input_target *target=calloc(1,sizeof(*target));
+        if (!target) { CFRelease(app); fail(error,@"无法分配窗口绑定资源"); return -1; }
+        target->pid=pid; target->app=app; target->window=(AXUIElementRef)CFRetain((CFTypeRef)window);
+        *out=target; return 1;
+    }
+}
+
+int jt_window_guard(jt_input_target *target, pid_t frontPid, char **error) {
+    @autoreleasepool {
+        if (!target || frontPid!=target->pid) { fail(error,@"纠错期间切换了应用，结果未上屏"); return 0; }
+        id window=attribute(target->app,kAXFocusedWindowAttribute);
+        if (!window || CFGetTypeID((CFTypeRef)window)!=AXUIElementGetTypeID() || !CFEqual((CFTypeRef)window,target->window)) {
+            fail(error,@"纠错期间切换了窗口，结果未上屏"); return 0;
+        }
+        return 1;
+    }
+}
+
+int jt_input_capture(pid_t pid, jt_input_target **out, char **data, char **error) {
+    @autoreleasepool {
+        if (!AXIsProcessTrusted()) { fail(error,@"请给启动 JustTalk 的终端辅助功能权限，才能读取输入框"); return -1; }
+        if (pid<=0) { fail(error,@"输入应用 PID 无效"); return -1; }
+        AXUIElementRef app=AXUIElementCreateApplication(pid);
+        AXUIElementSetMessagingTimeout(app,0.2);
+        // Query the standard role first, as required by Chromium clients.
+        AXUIElementRef editor=focusedWithBudget(app,error,0);
+        if (!editor || !inputFrontmost(app,error)) { CFRelease(app); return -1; }
+        NSString *role=attribute(editor,kAXRoleAttribute);
+        if (![@[(id)kAXTextAreaRole,(id)kAXTextFieldRole] containsObject:role] ||
+            [attribute(editor,kAXSubroleAttribute) isEqual:(id)kAXSecureTextFieldSubrole]) {
+            CFRelease(app); return 0;
+        }
+        Boolean writable=false;
+        AXError writableStatus=AXUIElementIsAttributeSettable(editor,kAXValueAttribute,&writable);
+        if (writableStatus!=kAXErrorSuccess && writableStatus!=kAXErrorAttributeUnsupported && writableStatus!=kAXErrorNotImplemented) {
+            CFRelease(app); fail(error,[NSString stringWithFormat:@"输入框可编辑状态读取失败（AX %d）",writableStatus]); return -1;
+        }
+        if (writableStatus!=kAXErrorSuccess || !writable) {
+            CFRelease(app); return 0;
+        }
+        pid_t editorPid=0;
+        if (AXUIElementGetPid(editor,&editorPid)!=kAXErrorSuccess || editorPid!=pid) {
+            CFRelease(app); fail(error,@"输入框不属于当前输入应用"); return -1;
+        }
+        NSString *value=attribute(editor,kAXValueAttribute);
+        if (![value isKindOfClass:[NSString class]] || value.length>4096) {
+            CFRelease(app); fail(error,@"输入框文本不可读取或超过 4096 字符"); return -1;
+        }
+        CFRange selection;
+        if (!inputSelection(editor,value,&selection,error)) { CFRelease(app); return -1; }
+        id window=attribute(editor,kAXWindowAttribute);
+        if (!window || CFGetTypeID((CFTypeRef)window)!=AXUIElementGetTypeID()) {
+            CFRelease(app); fail(error,@"无法确认输入框所属窗口"); return -1;
+        }
+        NSData *json=[NSJSONSerialization dataWithJSONObject:@{@"value":value,@"role":role,
+            @"prefix":[value substringToIndex:selection.location],
+            @"suffix":[value substringFromIndex:selection.location+selection.length]} options:0 error:nil];
+        if (!json) { CFRelease(app); fail(error,@"输入框快照编码失败"); return -1; }
+        jt_input_target *target=calloc(1,sizeof(*target));
+        if (!target) { CFRelease(app); fail(error,@"无法分配输入框读取资源"); return -1; }
+        target->pid=pid; target->app=app;
+        target->editor=(AXUIElementRef)CFRetain(editor); target->window=(AXUIElementRef)CFRetain((CFTypeRef)window);
+        target->before=[value copy]; target->selection=selection;
+        *data=strdup([[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease].UTF8String);
+        *out=target; return 1;
+    }
+}
+
+static NSString *inputValue(jt_input_target *target, char **error) {
+    if (!target || !inputFrontmost(target->app,error)) return nil;
+    AXUIElementRef editor=focusedWithBudget(target->app,error,0);
+    if (!editor) return nil;
+    id window=attribute(editor,kAXWindowAttribute);
+    if (!CFEqual(editor,target->editor) || !window || CFGetTypeID((CFTypeRef)window)!=AXUIElementGetTypeID() ||
+        !CFEqual((CFTypeRef)window,target->window)) {
+        fail(error,@"输入框或窗口已切换，停止读取本次语音修订"); return nil;
+    }
+    NSString *value=attribute(editor,kAXValueAttribute);
+    if (![value isKindOfClass:[NSString class]] || value.length>4096) {
+        fail(error,@"绑定输入框的文本读取失败或过长"); return nil;
+    }
+    return value;
+}
+
+int jt_input_read(jt_input_target *target, char **text, char **error) {
+    @autoreleasepool {
+        NSString *value=inputValue(target,error);
+        if (!value) return -1;
+        *text=strdup(value.UTF8String); return *text ? 1 : -1;
+    }
+}
+
+int jt_input_guard(jt_input_target *target, char **error) {
+    @autoreleasepool {
+        NSString *value=inputValue(target,error);
+        if (!value) return 0;
+        CFRange selection;
+        if (![value isEqual:target->before] || !inputSelection(target->editor,value,&selection,error) ||
+            selection.location!=target->selection.location || selection.length!=target->selection.length) {
+            if (!*error) fail(error,@"纠错期间输入文字或选区发生变化，结果未上屏"); return 0;
+        }
+        return 1;
+    }
+}
+
+void jt_input_release(jt_input_target *target) {
+    if (!target) return;
+    CFRelease(target->app); if (target->editor) CFRelease(target->editor); CFRelease(target->window);
+    [target->before release]; free(target);
 }
 
 static NSString *messageRole(NSString *heading) {
@@ -96,22 +263,17 @@ static NSString *headingRole(NSArray *values, int depth, char **error) {
     return nil;
 }
 
-static void flushMessage(NSMutableArray *messages, NSString *role, NSMutableArray *parts,
-                         AXUIElementRef userHeading, NSMutableArray *userAnchors) {
+static void flushMessage(NSMutableArray *messages, NSString *role, NSMutableArray *parts) {
     if (role && parts.count) {
         [messages addObject:@{@"role":role,@"text":[parts componentsJoinedByString:@"\n"]}];
-        if ([role isEqual:@"user"]) [userAnchors addObject:(id)userHeading];
-        if (messages.count>100) {
-            if ([messages[0][@"role"] isEqual:@"user"]) [userAnchors removeObjectAtIndex:0];
-            [messages removeObjectAtIndex:0];
-        }
+        if (messages.count>100) [messages removeObjectAtIndex:0];
     }
     [parts removeAllObjects];
 }
 
 static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUInteger *count,
                  NSTimeInterval deadline, NSMutableArray *messages, NSMutableArray *parts,
-                 NSString **currentRole, AXUIElementRef *lastUserHeading, NSMutableArray *userAnchors, char **error) {
+                 NSString **currentRole, AXUIElementRef *lastUserHeading, char **error) {
     if (depth>=60 || ++(*count)>18000 || [NSDate timeIntervalSinceReferenceDate]>deadline) {
         fail(error,@"当前聊天读取超过 2 秒或结构过大，未使用不完整上下文"); return NO;
     }
@@ -122,23 +284,23 @@ static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUIn
     if ([role isEqualToString:@"AXHeading"]) {
         NSString *next=headingRole(values,0,error); if (*error) return NO;
         if (next) {
-            flushMessage(messages,*currentRole,parts,*lastUserHeading,userAnchors); *currentRole=next;
+            flushMessage(messages,*currentRole,parts); *currentRole=next;
             if ([next isEqualToString:@"user"]) *lastUserHeading=element;
             return YES;
         }
     }
     NSString *text=stringValue(values[1]);
     if (*currentRole && [role isEqualToString:@"AXStaticText"] && text.length) [parts addObject:text];
-    for (id child in children(values)) if (!scan((AXUIElementRef)child,editor,depth+1,count,deadline,messages,parts,currentRole,lastUserHeading,userAnchors,error)) return NO;
+    for (id child in children(values)) if (!scan((AXUIElementRef)child,editor,depth+1,count,deadline,messages,parts,currentRole,lastUserHeading,error)) return NO;
     return YES;
 }
 
 static NSArray *captureMessages(AXUIElementRef main, AXUIElementRef editor, AXUIElementRef *lastUserHeading,
-                               NSMutableArray *userAnchors, char **error) {
+                               char **error) {
     NSMutableArray *messages=[NSMutableArray array],*parts=[NSMutableArray array];
     NSUInteger count=0; NSString *role=nil;
-    if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,lastUserHeading,userAnchors,error)) return nil;
-    flushMessage(messages,role,parts,*lastUserHeading,userAnchors);
+    if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,lastUserHeading,error)) return nil;
+    flushMessage(messages,role,parts);
     if (!messages.count) { fail(error,@"当前 Codex 聊天没有提供消息角色与正文，未执行无上下文纠错"); return nil; }
     return messages;
 }
@@ -180,8 +342,7 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
             CFRelease(app); fail(error,@"请把光标放在 Codex 草稿框；未识别到同一聊天主区域"); return -1;
         }
         AXUIElementRef userAnchor=NULL;
-        NSMutableArray *userAnchors=[NSMutableArray array];
-        NSArray *messages=captureMessages(main,editor,&userAnchor,userAnchors,error);
+        NSArray *messages=captureMessages(main,editor,&userAnchor,error);
         if (!messages) { CFRelease(app); return -1; }
         if (!userAnchor) { CFRelease(app); fail(error,@"当前聊天没有提供用户消息锚点，无法绑定自动上屏目标"); return -1; }
         NSData *json=[NSJSONSerialization dataWithJSONObject:messages options:0 error:nil];
@@ -192,8 +353,6 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
         target->editor=(AXUIElementRef)CFRetain(editor); target->main=(AXUIElementRef)CFRetain(main);
         target->userAnchor=(AXUIElementRef)CFRetain(userAnchor);
         target->draft=[draft copy]; target->messages=[userMessages(messages) copy];
-        target->users=[[messages filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"role == 'user'"]] copy];
-        target->userAnchors=[userAnchors copy];
         *data=strdup([[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease].UTF8String);
         *out=target; return 1;
     }
@@ -213,7 +372,7 @@ int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **err
         AXUIElementRef main=mainAncestor(editor);
         if (!main || !CFEqual(main,target->main)) { fail(error,@"纠错期间切换了聊天，结果未上屏"); return 0; }
         AXUIElementRef userAnchor=NULL;
-        NSArray *messages=captureMessages(main,editor,&userAnchor,nil,error);
+        NSArray *messages=captureMessages(main,editor,&userAnchor,error);
         if (!messages) return 0;
         // 助手流式回复可继续增长；绑定用户消息的 AX 身份与正文，避免写入切换后的聊天。
         if (!userAnchor || !CFEqual(userAnchor,target->userAnchor) || ![userMessages(messages) isEqual:target->messages]) {
@@ -223,27 +382,8 @@ int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **err
     }
 }
 
-int jt_correction_submitted_after(jt_correction_target *current, jt_correction_target *previous, char **text) {
-    @autoreleasepool {
-        if (!current || !previous || current->pid!=previous->pid ||
-            !CFEqual(current->main,previous->main) || !CFEqual(current->editor,previous->editor)) return 0;
-        if (current->users.count!=current->userAnchors.count) return 0;
-        for (NSUInteger i=0;i<current->userAnchors.count;i++) {
-            if (!CFEqual((CFTypeRef)current->userAnchors[i],previous->userAnchor)) continue;
-            if (i+1>=current->users.count || i+1<previous->messages.count) return 0;
-            for (NSUInteger j=0;j<previous->messages.count;j++) {
-                if (![current->users[i+1-previous->messages.count+j] isEqual:previous->messages[j]]) return 0;
-            }
-            NSString *submitted=current->users[i+1][@"text"];
-            if (!submitted.length) return 0;
-            *text=strdup(submitted.UTF8String); return *text ? 1 : 0;
-        }
-        return 0;
-    }
-}
-
 void jt_correction_release(jt_correction_target *target) {
     if (!target) return;
     CFRelease(target->app); CFRelease(target->editor); CFRelease(target->main); CFRelease(target->userAnchor);
-    [target->draft release]; [target->messages release]; [target->users release]; [target->userAnchors release]; free(target);
+    [target->draft release]; [target->messages release]; free(target);
 }

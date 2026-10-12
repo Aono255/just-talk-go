@@ -18,6 +18,65 @@ import (
 	"github.com/c/just-talk-go/internal/correction"
 )
 
+func TestUnreadableInputStillCorrectsUsingBoundWindowButDoesNotLearn(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same_window", true: "changed_window"}[changed], func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			var moved atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req struct{ Messages []struct{ Content string } }
+				if json.NewDecoder(r.Body).Decode(&req) != nil {
+					t.Error("invalid request")
+				}
+				var data struct{ Context []correction.Message }
+				if len(req.Messages) != 2 || json.Unmarshal([]byte(req.Messages[1].Content), &data) != nil || len(data.Context) != 0 {
+					t.Error("window-only correction acquired chat data")
+				}
+				moved.Store(changed)
+				json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]string{"content": `{"corrected_text":"使用 D01。"}`}}}})
+			}))
+			defer server.Close()
+			cfg := config.Default()
+			cfg.Correction = config.CorrectionConfig{Enabled: true, Learning: true, Provider: "openai-compatible", BaseURL: server.URL, Model: "test", APIKey: "test-only", TimeoutMS: 1000}
+			eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			p := NewVoicePlugin()
+			if err := eng.LoadPlugin(p); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(eng.Stop)
+			p.correctionInputCapture = func() (*correction.Input, error) { return nil, errors.New("AX -25212") }
+			p.correctionDestinationCapture = func() (*correction.Destination, error) {
+				return &correction.Destination{Guard: func() error {
+					if moved.Load() {
+						return errors.New("window changed")
+					}
+					return nil
+				}, Close: func() {}}, nil
+			}
+			pasted := ""
+			p.correctionClipboard = func(string) error { return nil }
+			p.correctionPaste = func(text string, guard func() error) error {
+				if err := guard(); err != nil {
+					return err
+				}
+				pasted = text
+				return nil
+			}
+			p.sessionID = 1
+			p.outputTranscript(&recordingSession{sessionID: 1, autoSubmit: true, correction: cfg.Correction}, "使用 P01。")
+			if (!changed && pasted != "使用 D01。") || (changed && pasted != "") {
+				t.Fatal("window guard/output mismatch")
+			}
+			p.mu.Lock()
+			watch := p.learningWatch
+			p.mu.Unlock()
+			if watch != nil {
+				t.Fatal("missing input was used to learn revisions")
+			}
+		})
+	}
+}
+
 func TestCorrectionRoutingKeepsOtherAppsUsableAndReportsCodexFocusErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -36,7 +95,7 @@ func TestCorrectionRoutingKeepsOtherAppsUsableAndReportsCodexFocusErrors(t *test
 			}))
 			defer server.Close()
 			cfg := config.Default()
-			cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
+			cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, Context: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
 			eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			p := NewVoicePlugin()
 			if err := eng.LoadPlugin(p); err != nil {
@@ -45,6 +104,8 @@ func TestCorrectionRoutingKeepsOtherAppsUsableAndReportsCodexFocusErrors(t *test
 			t.Cleanup(eng.Stop)
 			p.sessionID = 7
 			p.correctionCapture = func() (*correction.Target, error) { return nil, tc.captureErr }
+			p.correctionInputCapture = func() (*correction.Input, error) { return nil, correction.ErrUnsupportedInput }
+			p.correctionDestinationCapture = func() (*correction.Destination, error) { return nil, correction.ErrUnsupportedInput }
 			copied := make(chan string, 1)
 			p.correctionClipboard = func(text string) error { copied <- text; return nil }
 			p.outputTranscript(&recordingSession{sessionID: 7, correction: cfg.Correction}, "普通语音输入。")
@@ -92,7 +153,7 @@ func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T
 			}))
 			defer server.Close()
 			cfg := config.Default()
-			cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
+			cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, Context: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
 			eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			p := NewVoicePlugin()
 			if err := eng.LoadPlugin(p); err != nil {
@@ -157,7 +218,7 @@ func TestCorrectionRejectsChangedInputBeforeModelRequest(t *testing.T) {
 	}))
 	defer server.Close()
 	cfg := config.Default()
-	cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
+	cfg.Correction = config.CorrectionConfig{Provider: "openai-compatible", Enabled: true, Context: true, BaseURL: server.URL, Model: "small-test", APIKey: "test-key", TimeoutMS: 1000}
 	eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	p := NewVoicePlugin()
 	if err := eng.LoadPlugin(p); err != nil {

@@ -57,17 +57,3 @@ func TestContextAdaptersSelectBeforeReadingAndKeepBindingFailuresExplicit(t *tes
 		})
 	}
 }
-
-func TestSubmittedFeedbackRequiresTheSameContextSource(t *testing.T) {
-	called := 0
-	current := &Target{Source: Source{ID: "test-desktop"}, SubmittedAfter: func(*Target) (string, bool) { called++; return "已发送", true }}
-	for _, source := range []string{"", "test-terminal", "test-desktop"} {
-		text, ok := current.SubmittedTextAfter(&Target{Source: Source{ID: source}})
-		if ok != (source == "test-desktop") || (ok && text != "已发送") {
-			t.Fatal("cross-client feedback was accepted")
-		}
-	}
-	if called != 1 {
-		t.Fatal("native feedback reader received an unrelated client binding")
-	}
-}

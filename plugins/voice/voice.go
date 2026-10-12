@@ -17,7 +17,6 @@ import (
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/engine"
 	"github.com/c/just-talk-go/hotkey"
-	"github.com/c/just-talk-go/internal/autotype"
 	"github.com/c/just-talk-go/internal/clipboard"
 	"github.com/c/just-talk-go/internal/correction"
 )
@@ -251,51 +250,59 @@ func markTUIHandled(evt hotkey.Event) {
 }
 
 type VoicePlugin struct {
-	env                    engine.PluginEnv
-	logger                 *slog.Logger
-	cfg                    *config.Config
-	mu                     sync.Mutex
-	eventOnce              sync.Once
-	events                 chan hotkey.Event
-	combo                  hotkey.Combo
-	mode                   string
-	starting               bool
-	startCanceled          bool
-	recorderStart          func(*Recorder) error // Native-start seam for blocked-device regression tests.
-	transcript             string
-	transcriptUntil        time.Time
-	recording              bool
-	stopping               bool
-	holdReleased           bool
-	userStopped            bool
-	stopTimer              *time.Timer
-	stopAt                 time.Time
-	startedAt              time.Time
-	sessionID              uint64
-	sessionGen             uint64
-	recorder               *Recorder
-	asrClient              *ASRClient
-	asrCancel              context.CancelFunc
-	audioDone              <-chan struct{}
-	autoSubmit             bool
-	stopDelayMs            int
-	pendingDone            int
-	finishingSessions      map[uint64]struct{}
-	canceledSessions       map[uint64]struct{}
-	outputSessions         map[uint64]struct{}
-	sessionCorrection      config.CorrectionConfig
-	sessionHotwords        []string
-	correctionCancels      map[uint64]context.CancelFunc
-	correctionCapture      func() (*correction.Target, error)
-	correctionClipboard    func(string) error
-	learningPending        *pendingLearning
-	learningStopped        bool
-	errorUntil             time.Time
-	errorTimer             *time.Timer
-	lastError              string
-	flowActive             bool
-	cancelHotkeyRegistered bool
-	retryHotkeyRegistered  bool
+	outputMu                     sync.Mutex
+	env                          engine.PluginEnv
+	logger                       *slog.Logger
+	cfg                          *config.Config
+	mu                           sync.Mutex
+	eventOnce                    sync.Once
+	events                       chan hotkey.Event
+	combo                        hotkey.Combo
+	mode                         string
+	starting                     bool
+	startCanceled                bool
+	recorderStart                func(*Recorder) error // Native-start seam for blocked-device regression tests.
+	transcript                   string
+	transcriptUntil              time.Time
+	recording                    bool
+	stopping                     bool
+	holdReleased                 bool
+	userStopped                  bool
+	stopTimer                    *time.Timer
+	stopAt                       time.Time
+	startedAt                    time.Time
+	sessionID                    uint64
+	sessionGen                   uint64
+	recorder                     *Recorder
+	asrClient                    *ASRClient
+	asrCancel                    context.CancelFunc
+	audioDone                    <-chan struct{}
+	autoSubmit                   bool
+	stopDelayMs                  int
+	pendingDone                  int
+	finishingSessions            map[uint64]struct{}
+	canceledSessions             map[uint64]struct{}
+	outputSessions               map[uint64]struct{}
+	sessionCorrection            config.CorrectionConfig
+	sessionHotwords              []string
+	correctionCancels            map[uint64]context.CancelFunc
+	correctionCapture            func() (*correction.Target, error)
+	correctionInputCapture       func() (*correction.Input, error)
+	correctionDestinationCapture func() (*correction.Destination, error)
+	correctionPaste              func(string, func() error) error
+	correctionClipboard          func(string) error
+	learningWatch                *learningWatch
+	learningContext              context.Context
+	learningCancel               context.CancelFunc
+	learningEpoch                uint64
+	learningCommitMu             sync.Mutex
+	learningStopped              bool
+	errorUntil                   time.Time
+	errorTimer                   *time.Timer
+	lastError                    string
+	flowActive                   bool
+	cancelHotkeyRegistered       bool
+	retryHotkeyRegistered        bool
 }
 
 type recordingSession struct {
@@ -335,18 +342,16 @@ func (p *VoicePlugin) Start(ctx context.Context) error {
 }
 
 func (p *VoicePlugin) Stop() error {
+	p.learningCommitMu.Lock()
 	p.mu.Lock()
 	p.startCanceled = true
 	p.learningStopped = true
-	previous := p.learningPending
-	p.learningPending = nil
+	p.stopLearningLocked()
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
 	p.publishStatusLocked()
 	p.mu.Unlock()
-	if previous != nil {
-		previous.target.Close()
-	}
+	p.learningCommitMu.Unlock()
 	p.finishRecordingSession(session)
 	return nil
 }
@@ -354,17 +359,12 @@ func (p *VoicePlugin) Stop() error {
 func (p *VoicePlugin) OnConfigReload(cfg *config.Config) error { return p.registerFromConfig(cfg) }
 
 func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
+	p.learningCommitMu.Lock()
 	p.mu.Lock()
+	p.configureLearningLocked(cfg.Correction)
 	p.cfg = cfg
-	var previous *pendingLearning
-	if !cfg.Correction.Enabled || !cfg.Correction.Learning {
-		previous = p.learningPending
-		p.learningPending = nil
-	}
 	p.mu.Unlock()
-	if previous != nil {
-		previous.target.Close()
-	}
+	p.learningCommitMu.Unlock()
 	vc := cfg.Voice
 	if !vc.Enabled {
 		p.mu.Lock()
@@ -943,7 +943,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 	go func() {
 		if autoSubmit {
-			if err := autotype.Paste(text, p.logger); err != nil {
+			if err := p.pasteTranscript(text, nil, nil); err != nil {
 				pout("❌ 上屏失败: %v", err)
 			} else {
 				pout("📋 已复制到剪贴板")
@@ -1033,7 +1033,7 @@ func (p *VoicePlugin) publishStatusLocked() {
 	case p.recording:
 		state, detail = "recording", "录音中"
 	case len(p.correctionCancels) > 0:
-		state, detail = "correcting", "结合当前会话进行上下文修正"
+		state, detail = "correcting", "正在进行 AI 输入修正"
 		stopping = true
 	case p.pendingDone > 0:
 		state, detail = "stopping", "正在停止并等待识别结果"

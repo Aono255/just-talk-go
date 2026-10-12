@@ -21,8 +21,8 @@ type applicationIdentity struct {
 	BundleID string `json:"bundle_id"`
 }
 
-// Each adapter owns its reader, input guard, native resources and sent-feedback
-// extraction. Model requests do not depend on these native APIs.
+// Each adapter owns its reader, input guard and native resources.
+// Shared memory and input revision learning do not depend on context adapters.
 type contextAdapter struct {
 	Source  Source
 	Matches func(applicationIdentity) bool
@@ -37,8 +37,6 @@ type Target struct {
 	AvailableAssistants int
 	Guard               func() error
 	Close               func()
-	SubmittedAfter      func(*Target) (string, bool)
-	platform            any
 }
 
 func Capture() (*Target, error) { return capturePlatform() }
@@ -77,14 +75,6 @@ func captureForApplication(app applicationIdentity, adapters []contextAdapter) (
 	}
 	target.Source = adapter.Source
 	return target, nil
-}
-
-// A binding from another client must never be used as learning feedback.
-func (t *Target) SubmittedTextAfter(previous *Target) (string, bool) {
-	if t == nil || previous == nil || t.Source.ID == "" || t.Source.ID != previous.Source.ID || t.SubmittedAfter == nil {
-		return "", false
-	}
-	return t.SubmittedAfter(previous)
 }
 
 // RunFocusHelper writes application identity once, before configuration or plugins are loaded.

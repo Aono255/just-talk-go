@@ -3,7 +3,6 @@ package voice
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/c/just-talk-go/internal/autotype"
@@ -18,150 +17,225 @@ func (p *VoicePlugin) correctionSessionCurrent(sessionID uint64) bool {
 }
 
 func (p *VoicePlugin) copyTranscriptText(text string) error {
+	p.outputMu.Lock()
+	defer p.outputMu.Unlock()
 	if p.correctionClipboard != nil {
 		return p.correctionClipboard(text)
 	}
 	return writeClipboard(text)
 }
 
+func (p *VoicePlugin) pasteTranscript(text string, guard func() error, delivered func()) error {
+	p.outputMu.Lock()
+	defer p.outputMu.Unlock()
+	// Programmatic output must never be mistaken for a user edit of the prior
+	// dictation. Install the next watch before another paste can start.
+	p.flushLearning(0)
+	if guard == nil {
+		guard = func() error { return nil }
+	}
+	var err error
+	if p.correctionPaste != nil {
+		err = p.correctionPaste(text, guard)
+	} else {
+		err = autotype.PasteChecked(text, p.logger, guard)
+	}
+	if err == nil && delivered != nil {
+		delivered()
+	}
+	return err
+}
+
 func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
-	if !session.correction.Enabled {
+	// Preserve ordinary voice delivery when no input-learning binding is needed.
+	if !session.correction.Enabled && (!session.autoSubmit || !correction.LearningReady(session.correction)) {
 		p.dispatchTextOutput(text, session.autoSubmit)
 		return
 	}
 	if !p.correctionSessionCurrent(session.sessionID) {
-		return
-	}
-	capture := p.correctionCapture
-	if capture == nil {
-		capture = correction.Capture
-	}
-	target, err := capture()
-	if errors.Is(err, correction.ErrUnsupportedContext) {
-		// Unsupported clients use ordinary voice input without context/model reads.
-		p.dispatchTextOutput(text, session.autoSubmit)
-		return
-	}
-	retained := false
-	if target != nil {
-		defer func() {
-			if !retained {
-				target.Close()
-			}
-		}()
-	}
-	if !p.correctionSessionCurrent(session.sessionID) {
-		return
-	}
-	// 模型错误、超时或焦点改变时，识别原文仍可从剪贴板取回。
-	if copyErr := p.copyTranscriptText(text); copyErr != nil {
-		p.publishError("识别原文复制失败，未调用纠错服务", session.sessionID)
-		return
-	}
-	if err != nil {
-		p.correctionFailed(session.sessionID, err)
-		return
-	}
-	ctx, cancel := context.WithCancel(p.env.Engine().Context())
-	defer cancel()
-	p.mu.Lock()
-	if p.correctionCancels == nil {
-		p.correctionCancels = make(map[uint64]context.CancelFunc)
-	}
-	p.correctionCancels[session.sessionID] = cancel
-	p.publishStatusLocked()
-	p.mu.Unlock()
-	defer func() {
-		p.mu.Lock()
-		delete(p.correctionCancels, session.sessionID)
-		p.publishStatusLocked()
-		p.mu.Unlock()
-	}()
-	if !p.correctionSessionCurrent(session.sessionID) {
-		return
-	}
-	users, assistants, chars := 0, 0, 0
-	mentionsDeepSeek := false
-	for _, message := range target.Messages {
-		if message.Role == "user" {
-			users++
-		} else {
-			assistants++
+		if !session.correction.Enabled {
+			p.dispatchTextOutput(text, session.autoSubmit)
 		}
-		chars += len([]rune(message.Text))
-		mentionsDeepSeek = mentionsDeepSeek || strings.Contains(strings.ToLower(message.Text), "deepseek")
-	}
-	p.logger.Info("correction context", "source", target.Source.ID, "available_user_messages", target.AvailableUsers, "available_assistant_messages", target.AvailableAssistants, "user_messages", users, "assistant_messages", assistants, "context_chars", chars, "mentions_deepseek", mentionsDeepSeek)
-	pout("✨ 上下文修正 · %s · 用户 %d / 助手 %d · %d 字符", target.Source.Name, users, assistants, chars)
-	started := time.Now()
-	if err := target.Guard(); err != nil {
-		p.correctionFailed(session.sessionID, err)
 		return
 	}
-	learning := p.prepareLearning(session.sessionID, target, session.correction.Learning)
-	corrected, err := correction.Correct(ctx, session.correction, text, target.Messages, session.hotwords, learning)
-	if !p.correctionSessionCurrent(session.sessionID) || ctx.Err() != nil {
+	p.flushLearning(session.sessionID)
+	if err := p.copyTranscriptText(text); err != nil {
+		p.publishError("识别原文复制失败", session.sessionID)
 		return
 	}
-	if err != nil {
-		p.correctionFailed(session.sessionID, err)
-		return
+	var target *correction.Target
+	var input *correction.Input
+	var destination *correction.Destination
+	inputRetained := false
+	defer func() {
+		if destination != nil {
+			destination.Close()
+		}
+		if target != nil {
+			target.Close()
+		}
+		if input != nil && !inputRetained {
+			input.Close()
+		}
+	}()
+	model := session.correction.Enabled
+	if model && session.correction.Context {
+		capture := p.correctionCapture
+		if capture == nil {
+			capture = correction.Capture
+		}
+		var err error
+		target, err = capture()
+		if err != nil && !errors.Is(err, correction.ErrUnsupportedContext) {
+			p.correctionFailed(session.sessionID, err)
+			return
+		}
+	}
+	// Unmatched applications explicitly use input-only correction. A failure
+	// from a matched context adapter never reaches this path.
+	if model && target == nil {
+		capture := p.correctionDestinationCapture
+		if capture == nil {
+			capture = correction.CaptureDestination
+		}
+		var err error
+		destination, err = capture()
+		if err != nil {
+			if !errors.Is(err, correction.ErrUnsupportedInput) {
+				p.correctionFailed(session.sessionID, err)
+				return
+			}
+			model = false
+			pout("ℹ️ 当前平台使用普通语音输入")
+		}
+	}
+	if (model && target == nil) || (session.autoSubmit && correction.LearningReady(session.correction)) {
+		capture := p.correctionInputCapture
+		if capture == nil {
+			capture = correction.CaptureInput
+		}
+		var err error
+		input, err = capture()
+		if err != nil {
+			p.logger.Info("input revision capture unavailable", "error", err)
+			if session.correction.Learning {
+				pout("🧠 当前应用未提供可读输入框；本次不采集修订")
+			}
+		}
 	}
 	guard := func() error {
+		if !model {
+			return nil
+		}
 		if !p.correctionSessionCurrent(session.sessionID) {
 			return errors.New("已取消或开始了新录音，结果未上屏")
 		}
-		if err := target.Guard(); err != nil {
-			return err
+		if model {
+			if target != nil {
+				if err := target.Guard(); err != nil {
+					return err
+				}
+			} else if destination != nil {
+				if err := destination.Guard(); err != nil {
+					return err
+				}
+				if input != nil {
+					if err := input.Guard(); err != nil {
+						return err
+					}
+				}
+			} else {
+				return errors.New("没有绑定可用输入框，结果未上屏")
+			}
 		}
 		if !p.correctionSessionCurrent(session.sessionID) {
 			return errors.New("已取消或开始了新录音，结果未上屏")
 		}
 		return nil
 	}
+	output := text
+	started := time.Now()
+	if model {
+		ctx, cancel := context.WithCancel(p.env.Engine().Context())
+		defer cancel()
+		p.mu.Lock()
+		if p.correctionCancels == nil {
+			p.correctionCancels = make(map[uint64]context.CancelFunc)
+		}
+		p.correctionCancels[session.sessionID] = cancel
+		p.publishStatusLocked()
+		p.mu.Unlock()
+		defer func() {
+			p.mu.Lock()
+			delete(p.correctionCancels, session.sessionID)
+			p.publishStatusLocked()
+			p.mu.Unlock()
+		}()
+		if err := guard(); err != nil {
+			p.correctionFailed(session.sessionID, err)
+			return
+		}
+		var messages []correction.Message
+		notes := p.sharedMemory(session.correction.Learning)
+		if target != nil {
+			messages = target.Messages
+			users, assistants, chars := 0, 0, 0
+			for _, m := range messages {
+				if m.Role == "user" {
+					users++
+				} else {
+					assistants++
+				}
+				chars += len([]rune(m.Text))
+			}
+			p.logger.Info("correction context", "source", target.Source.ID, "available_user_messages", target.AvailableUsers,
+				"available_assistant_messages", target.AvailableAssistants, "user_messages", users, "assistant_messages", assistants, "context_chars", chars)
+			pout("✨ 上下文修正 · %s · 用户 %d / 助手 %d · %d 字符", target.Source.Name, users, assistants, chars)
+		} else {
+			pout("✨ AI 输入修正 · 共享记忆 %d 条", len(notes))
+		}
+		var err error
+		output, err = correction.Correct(ctx, session.correction, text, messages, session.hotwords, notes)
+		if ctx.Err() != nil || !p.correctionSessionCurrent(session.sessionID) {
+			return
+		}
+		if err != nil {
+			p.correctionFailed(session.sessionID, err)
+			return
+		}
+	}
+	var err error
 	if session.autoSubmit {
-		err = autotype.PasteChecked(corrected, p.logger, guard)
+		err = p.pasteTranscript(output, guard, func() {
+			if input != nil {
+				inputRetained = p.startLearning(session, input, text, output)
+			}
+		})
 	} else {
 		err = guard()
-		if err == nil {
-			err = p.copyTranscriptText(corrected)
+		if err == nil && output != text {
+			err = p.copyTranscriptText(output)
 		}
 	}
 	if err != nil {
 		if p.correctionSessionCurrent(session.sessionID) {
 			if restoreErr := p.copyTranscriptText(text); restoreErr != nil {
-				p.publishError("纠错未上屏，识别原文复制失败", session.sessionID)
+				p.publishError("上屏未完成，识别原文复制失败", session.sessionID)
 				return
 			}
 		}
 		p.correctionFailed(session.sessionID, err)
 		return
 	}
-	p.updateTranscript(session.sessionID, corrected)
-	if session.correction.Learning {
-		retained = p.retainLearningTarget(session.sessionID, target, text, corrected)
-		if learning != nil && learning.Error != nil {
-			p.logger.Warn("correction learning response invalid", "error", learning.Error)
-			pout("🧠 %s；整理结果已输出", learning.Error)
-		}
-		if retained && learning != nil && len(learning.Updates) > 0 {
-			count, err := correction.Remember(CorrectionMemoryPath(), learning.Updates)
-			if err != nil {
-				p.logger.Warn("correction memory save failed", "error", err)
-				pout("🧠 自学习记忆保存失败；整理结果已输出")
-			} else {
-				p.logger.Info("correction memory updated", "notes", count, "updates", len(learning.Updates))
-				pout("🧠 自学习记忆 %d 条 · 本次提炼 %d 条", count, len(learning.Updates))
-			}
-		}
+	p.updateTranscript(session.sessionID, output)
+	if model {
+		p.logger.Info("correction completed", "model", session.correction.Model, "duration_ms", time.Since(started).Milliseconds(), "text_len", len(output))
+		pout("✨ 已纠错整理 (%dms)", time.Since(started).Milliseconds())
 	}
-	p.logger.Info("correction completed", "model", session.correction.Model,
-		"duration_ms", time.Since(started).Milliseconds(), "context_messages", len(target.Messages), "text_len", len(corrected))
-	pout("✨ 已纠错整理 (%dms)", time.Since(started).Milliseconds())
 	if session.autoSubmit {
 		pout("✅ 已上屏")
 	} else {
-		pout("📋 已复制整理结果")
+		pout("📋 已复制")
 	}
 }
 

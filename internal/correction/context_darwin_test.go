@@ -31,46 +31,20 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestNativeFeedbackRequiresOriginalChatAnchorAndSelectsFirstSentMessage(t *testing.T) {
+func TestNativeContextMessagesStayBounded(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "feedback.m")
 	program := `#include "context_darwin.m"
 #include <assert.h>
 int main(void) { @autoreleasepool {
-    jt_correction_target previous={0}, current={0};
-    previous.pid=current.pid=100;
-    previous.main=current.main=(AXUIElementRef)@"same-main";
-    previous.editor=current.editor=(AXUIElementRef)@"same-editor";
-    previous.userAnchor=(AXUIElementRef)@"original-anchor";
-    previous.messages=@[@{@"role":@"user",@"text":@"old-user-message"}];
-    current.users=@[previous.messages[0],@{@"role":@"user",@"text":@"user-edited D01"},@{@"role":@"user",@"text":@"later-unrelated-message"}];
-    current.userAnchors=@[@"original-anchor",@"sent-anchor",@"later-anchor"];
-    char *text=NULL;
-    assert(jt_correction_submitted_after(&current,&previous,&text)==1);
-    assert(strcmp(text,"user-edited D01")==0); free(text); text=NULL;
-    current.pid=200;
-    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
-    current.pid=100; current.main=(AXUIElementRef)@"different-main";
-    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
-    current.main=previous.main; current.editor=(AXUIElementRef)@"different-editor";
-    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
-    current.editor=previous.editor;
-    current.userAnchors=@[@"replacement-anchor",@"sent-anchor",@"later-anchor"];
-    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
-    current.userAnchors=@[@"original-anchor",@"sent-anchor",@"later-anchor"];
-    current.users=@[@{@"role":@"user",@"text":@"edited-old-message"},@{@"role":@"user",@"text":@"user-edited D01"},@{@"role":@"user",@"text":@"later-unrelated-message"}];
-    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
-    current.users=previous.messages; current.userAnchors=@[@"original-anchor"];
-    assert(jt_correction_submitted_after(&current,&previous,&text)==0);
-    NSMutableArray *messages=[NSMutableArray array], *anchors=[NSMutableArray array], *parts=[NSMutableArray array];
+    NSMutableArray *messages=[NSMutableArray array], *parts=[NSMutableArray array];
     for (int i=0;i<105;i++) {
         [parts addObject:[NSString stringWithFormat:@"message-%d",i]];
-        flushMessage(messages,i%2?@"assistant":@"user",parts,(AXUIElementRef)[NSString stringWithFormat:@"anchor-%d",i],anchors);
+        flushMessage(messages,i%2?@"assistant":@"user",parts);
     }
     assert(messages.count==100);
-    NSArray *users=[messages filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"role == 'user'"]];
-    assert(users.count==anchors.count);
-    assert([anchors[0] isEqual:@"anchor-6"]);
+    assert(userMessages(messages).count==6);
+    assert([messages[0][@"text"] isEqual:@"message-5"]);
 } return 0; }`
 	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
 		t.Fatal(err)
@@ -162,6 +136,96 @@ int main(void) { @autoreleasepool {
 	}
 	if output, err := exec.Command(binary).CombinedOutput(); err != nil {
 		t.Fatalf("native focus failure handling: %v\n%s", err, output)
+	}
+}
+
+func TestNativeGenericInputBindsEditableSelectionWithoutReadingHistory(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "input.m")
+	program := `#import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
+#include <assert.h>
+static id appNode, editorNode, windowNode, focusNode;
+static NSString *fieldValue, *fieldSubrole;
+static BOOL frontmost=YES, writable=YES;
+static AXError writableStatus=kAXErrorSuccess;
+static CFRange selected;
+static int valueReads;
+static AXError copyInput(AXUIElementRef element, CFStringRef name, CFTypeRef *out) {
+    id value=nil;
+    if (CFEqual(name,kAXRoleAttribute)) value=CFEqual(element,(CFTypeRef)appNode)?(id)kAXApplicationRole:(id)kAXTextAreaRole;
+    else if (CFEqual(name,kAXFocusedUIElementAttribute)) value=focusNode;
+    else if (CFEqual(name,kAXFrontmostAttribute)) value=frontmost?@YES:@NO;
+    else if (CFEqual(name,kAXWindowAttribute) || CFEqual(name,kAXFocusedWindowAttribute)) value=windowNode;
+    else if (CFEqual(name,kAXSubroleAttribute)) value=fieldSubrole;
+    else if (CFEqual(name,kAXValueAttribute)) { value=fieldValue; valueReads++; }
+    else if (CFEqual(name,kAXSelectedTextRangeAttribute)) { *out=AXValueCreate(kAXValueCFRangeType,&selected); return kAXErrorSuccess; }
+    else { assert(0 && "must not traverse chat or unrelated elements"); }
+    *out=value?CFRetain((CFTypeRef)value):NULL;
+    return value?kAXErrorSuccess:kAXErrorNoValue;
+}
+static bool trusted(void) { return true; }
+static AXUIElementRef createApp(pid_t pid) { return (AXUIElementRef)CFRetain((CFTypeRef)appNode); }
+static AXError timeout(AXUIElementRef app,float seconds) { return kAXErrorSuccess; }
+static AXError getPid(AXUIElementRef element,pid_t *pid) { *pid=123;return kAXErrorSuccess; }
+static AXError settable(AXUIElementRef element,CFStringRef name,Boolean *out) { *out=writable;return writableStatus; }
+static CFTypeID elementType(void) { return CFDictionaryGetTypeID(); }
+#define AXIsProcessTrusted trusted
+#define AXUIElementCreateApplication createApp
+#define AXUIElementSetMessagingTimeout timeout
+#define AXUIElementGetPid getPid
+#define AXUIElementIsAttributeSettable settable
+#define AXUIElementCopyAttributeValue copyInput
+#define AXUIElementGetTypeID elementType
+#include "context_darwin.m"
+int main(void) { @autoreleasepool {
+ appNode=@{@"id":@"app"};editorNode=@{@"id":@"editor"};windowNode=@{@"id":@"window"};focusNode=editorNode;
+ fieldValue=@"前🙂旧后";fieldSubrole=@"";selected=CFRangeMake(3,1);
+ jt_input_target *input=NULL;char *data=NULL,*error=NULL,*text=NULL;
+ assert(jt_input_capture(123,&input,&data,&error)==1 && input && !error);
+ NSDictionary *snapshot=[NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:data] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+ assert([snapshot[@"prefix"] isEqual:@"前🙂"] && [snapshot[@"suffix"] isEqual:@"后"]);free(data);
+ assert(jt_input_guard(input,&error)==1 && !error);
+ selected=CFRangeMake(4,0);
+ assert(jt_input_guard(input,&error)==0 && error);free(error);error=NULL;
+ fieldValue=@"前🙂D01后";
+ assert(jt_input_read(input,&text,&error)==1 && !error);assert(strcmp(text,"前🙂D01后")==0);free(text);
+ frontmost=NO;valueReads=0;
+ assert(jt_input_read(input,&text,&error)==-1 && valueReads==0);free(error);error=NULL;
+ frontmost=YES;focusNode=@{@"id":@"other-editor"};valueReads=0;
+ assert(jt_input_read(input,&text,&error)==-1 && valueReads==0);free(error);error=NULL;
+ jt_input_release(input);input=NULL;focusNode=editorNode;
+ writable=NO;valueReads=0;
+ assert(jt_input_capture(123,&input,&data,&error)==0 && !input && valueReads==0);
+ writable=YES;writableStatus=kAXErrorCannotComplete;
+ assert(jt_input_capture(123,&input,&data,&error)==-1 && error && strstr(error,"-25204"));free(error);error=NULL;
+ writableStatus=kAXErrorSuccess;fieldSubrole=(id)kAXSecureTextFieldSubrole;valueReads=0;
+ assert(jt_input_capture(123,&input,&data,&error)==0 && !input && valueReads==0);
+ // A window-only destination remains usable when the application exposes no
+ // focused editor. It never acquires text and still rejects app/window changes.
+ focusNode=nil;valueReads=0;
+ assert(jt_window_capture(123,&input,&error)==1 && input && valueReads==0);
+ assert(jt_window_guard(input,123,&error)==1 && !error);
+ assert(jt_window_guard(input,456,&error)==0 && error);free(error);error=NULL;
+ windowNode=@{@"id":@"other-window"};
+ assert(jt_window_guard(input,123,&error)==0 && error);free(error);error=NULL;
+ jt_input_release(input);
+ } return 0; }
+`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	include, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "input")
+	command := exec.Command("xcrun", "--sdk", "macosx", "clang", "-x", "objective-c", "-I", include, source, "-framework", "AppKit", "-framework", "ApplicationServices", "-o", binary)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile input fixture: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(binary).CombinedOutput(); err != nil {
+		t.Fatalf("input binding fixture: %v\n%s", err, output)
 	}
 }
 
