@@ -306,6 +306,10 @@ Confirm `just-talk --version` is at least `v0.1.9`, exit the old process, and re
 
 The system-wide AX focus query used in `v0.1.8` returned `-25204` immediately on an authorized device even with a longer timeout, producing an application-detection failure. From `v0.1.9`, a separate process queries AppKit application identity without reading configuration, conversation text or microphone input. Helper failure or a 2-second timeout still prevents paste. The main process retains Codex input/chat binding checks and rechecks application identity before paste. Failures are logged to distinguish application detection from conversation access problems.
 
+### No audio within 3 seconds after reconnecting a headset
+
+Upgrade to `v0.1.11` or later, exit the old process, and restart once. Older versions did not service the macOS main event loop while idle, potentially retaining an obsolete AVFoundation device object after reconnection. TUI and non-TUI modes now process device notifications continuously and retrieve the current default microphone for each recording, so reconnecting does not require restarting the program. The 3-second first-buffer check remains, without a longer wait, automatic retries, or changes to system audio settings.
+
 ### Stuck at “准备中” or the older CON label
 
 Check the default microphone, Bluetooth headset readiness, and other applications' system-audio capture. In an earlier headset investigation, repeated recording worked after disabling Codex Audio visualizer. In versions offering the setting, check Settings → General → Toys. This is a verified diagnostic lead, not a guarantee for every device.

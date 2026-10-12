@@ -123,9 +123,14 @@ func main() {
 	if *noTUI {
 		*useTUI = false
 	}
+	runPlatformMain(func() {
+		runApplication(*backend, *cfgPath, *debug, *verbose, *useTUI, *doctorOnly)
+	})
+}
 
+func runApplication(backend, cfgPath string, debug, verbose, useTUI, doctorOnly bool) {
 	logLevel := slog.LevelInfo
-	if *verbose {
+	if verbose {
 		logLevel = slog.LevelDebug
 	}
 
@@ -133,7 +138,7 @@ func main() {
 	logPath := defaultLogPath()
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
 	var logWriter io.Writer
-	if *useTUI {
+	if useTUI {
 		lf, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if lf != nil {
 			logWriter = lf
@@ -151,21 +156,21 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		logger.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
 
-	if *backend == "" {
-		*backend = os.Getenv("JUST_TALK_BACKEND")
+	if backend == "" {
+		backend = os.Getenv("JUST_TALK_BACKEND")
 	}
-	if *backend != "" {
-		os.Setenv("JUST_TALK_BACKEND", *backend)
+	if backend != "" {
+		os.Setenv("JUST_TALK_BACKEND", backend)
 	}
 
-	report := doctor.Run(cfg, *backend)
-	if *doctorOnly || !report.Healthy() {
+	report := doctor.Run(cfg, backend)
+	if doctorOnly || !report.Healthy() {
 		report.Print(os.Stderr)
 		if report.Healthy() {
 			return
@@ -173,7 +178,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	provider, err := createProvider(*backend)
+	provider, err := createProvider(backend)
 	if err != nil {
 		logger.Error("failed to create provider", "error", err)
 		printTroubleshooting(err)
@@ -183,7 +188,7 @@ func main() {
 
 	eng := engine.New(provider, cfg, logger)
 
-	if *debug && cfg.Debug.Enabled && !*useTUI {
+	if debug && cfg.Debug.Enabled && !useTUI {
 		eng.LoadPlugin(plugins.NewDebugPlugin())
 	}
 	eng.LoadPlugin(voice.NewVoicePlugin())
@@ -192,8 +197,8 @@ func main() {
 		eng.WatchConfig(p)
 	}
 
-	if *useTUI {
-		runTUI(eng, cfg, *debug)
+	if useTUI {
+		runTUI(eng, cfg, debug)
 	} else {
 		runDaemon(eng)
 	}

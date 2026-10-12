@@ -59,6 +59,7 @@ Linux:
 macOS:
 
 - Global hotkeys use CGEventTap through `ApplicationServices`.
+- The normal TUI/daemon entry runs the Core Foundation event loop continuously on the locked process main thread, with the Go application on a background goroutine. This is required to refresh AVFoundation device objects after idle headset disconnect/reconnect. Keep helper and one-shot CLI dispatch before this entry, keep the loop alive before native sources arrive, and queue its stop request so immediate application return cannot lose shutdown.
 - Recording uses AVFoundation with the selected default microphone and 16 kHz, 16-bit mono PCM. CoreAudio only queries the selected device UID; it does not change system devices or hardware formats. Preserve the first-buffer readiness check, bounded in-memory capture buffer, reader wakeup on stop, and unread tail audio. Do not restore an automatic AudioQueue fallback.
 - Clipboard uses NSPasteboard.
 - Auto-submit posts native keyboard events.
