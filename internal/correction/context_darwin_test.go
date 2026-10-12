@@ -89,6 +89,60 @@ int main(void) { @autoreleasepool {
 	}
 }
 
+func TestNativeFocusReadErrorsRemainExplicitBeforeBindingChecks(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "focus.m")
+	program := `#import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
+#include <assert.h>
+static AXError copyStatus;
+static CFTypeRef copyValue;
+static AXError copyFocus(AXUIElementRef app, CFStringRef name, CFTypeRef *value) {
+    assert(CFEqual(name,kAXFocusedUIElementAttribute));
+    *value=copyValue?CFRetain(copyValue):NULL;
+    return copyStatus;
+}
+static CFTypeID fixtureElementType(void) { return CFDictionaryGetTypeID(); }
+#define AXUIElementCopyAttributeValue copyFocus
+#define AXUIElementGetTypeID fixtureElementType
+#include "context_darwin.m"
+int main(void) { @autoreleasepool {
+    jt_correction_target target={0}; target.pid=123;
+    target.app=(AXUIElementRef)@{@"id":@"fixture-app"};
+    for (int i=0;i<3;i++) {
+        copyStatus=i==0?kAXErrorNoValue:i==1?kAXErrorCannotComplete:kAXErrorSuccess;
+        copyValue=NULL;
+        char *error=NULL;
+        assert(jt_correction_guard(&target,123,&error)==0);
+        assert(error && strstr(error,"AX "));
+        assert(strstr(error,i==1?"-25204":"-25212"));
+        assert(!strstr(error,"切换")); free(error);
+    }
+    copyStatus=kAXErrorSuccess; copyValue=(CFTypeRef)@"invalid-type";
+    char *error=NULL;
+    assert(focused(target.app,&error)==NULL);
+    assert(error && strstr(error,"返回类型无效")); free(error); error=NULL;
+    copyValue=(CFTypeRef)@{@"id":@"fixture-editor"};
+    assert(focused(target.app,&error)==(AXUIElementRef)copyValue);
+    assert(error==NULL);
+} return 0; }`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	include, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "focus")
+	cmd := exec.Command("xcrun", "--sdk", "macosx", "clang", "-x", "objective-c", "-I", include, source, "-framework", "AppKit", "-framework", "ApplicationServices", "-o", binary)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile native focus fixture: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(binary).CombinedOutput(); err != nil {
+		t.Fatalf("native focus failure handling: %v\n%s", err, output)
+	}
+}
+
 func TestFreshApplicationQueryDoesNotReusePreviousApp(t *testing.T) {
 	t.Setenv("JUST_TALK_TEST_FOCUS_HELPER", "1")
 	executable, err := os.Executable()

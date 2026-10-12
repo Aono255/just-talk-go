@@ -21,9 +21,18 @@ static id attribute(AXUIElementRef element, CFStringRef name) {
     return [(id)value autorelease];
 }
 
-static AXUIElementRef focused(AXUIElementRef app) {
-    id value = attribute(app, kAXFocusedUIElementAttribute);
-    return value && CFGetTypeID((CFTypeRef)value) == AXUIElementGetTypeID() ? (AXUIElementRef)value : NULL;
+static AXUIElementRef focused(AXUIElementRef app, char **error) {
+    CFTypeRef value=NULL;
+    AXError status=AXUIElementCopyAttributeValue(app,kAXFocusedUIElementAttribute,&value);
+    if (status!=kAXErrorSuccess || !value) {
+        if (value) CFRelease(value);
+        fail(error,[NSString stringWithFormat:@"当前应用未提供可用输入焦点（AX %d），无法确认上屏目标",status==kAXErrorSuccess?kAXErrorNoValue:status]);
+        return NULL;
+    }
+    if (CFGetTypeID(value)!=AXUIElementGetTypeID()) {
+        CFRelease(value); fail(error,@"输入焦点返回类型无效，无法确认上屏目标"); return NULL;
+    }
+    return (AXUIElementRef)[(id)value autorelease];
 }
 
 // 仅由独立的单次助手进程调用；主进程不依赖 AppKit 的前台应用缓存。
@@ -142,9 +151,11 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
         AXUIElementSetMessagingTimeout(system,0.2); CFRelease(system);
         AXUIElementRef app=AXUIElementCreateApplication(pid);
         AXUIElementSetMessagingTimeout(app,0.2);
-        AXUIElementRef editor=focused(app),main=editor?mainAncestor(editor):NULL;
-        NSString *draft=editor?attribute(editor,kAXValueAttribute):nil;
-        if (!editor || ![attribute(editor,kAXRoleAttribute) isEqual:@"AXTextArea"] || ![draft isKindOfClass:[NSString class]] || !main) {
+        AXUIElementRef editor=focused(app,error);
+        if (!editor) { CFRelease(app); return -1; }
+        AXUIElementRef main=mainAncestor(editor);
+        NSString *draft=attribute(editor,kAXValueAttribute);
+        if (![attribute(editor,kAXRoleAttribute) isEqual:@"AXTextArea"] || ![draft isKindOfClass:[NSString class]] || !main) {
             CFRelease(app); fail(error,@"请把光标放在 Codex 草稿框；未识别到同一聊天主区域"); return -1;
         }
         AXUIElementRef userAnchor=NULL;
@@ -170,8 +181,9 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
 int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **error) {
     @autoreleasepool {
         if (frontPid!=target->pid) { fail(error,@"纠错期间切换了应用，结果未上屏"); return 0; }
-        AXUIElementRef editor=focused(target->app);
-        if (!editor || !CFEqual(editor,target->editor)) {
+        AXUIElementRef editor=focused(target->app,error);
+        if (!editor) return 0;
+        if (!CFEqual(editor,target->editor)) {
             fail(error,@"纠错期间切换了应用或输入框，结果未上屏"); return 0;
         }
         if (![attribute(editor,kAXValueAttribute) isEqual:target->draft]) {
