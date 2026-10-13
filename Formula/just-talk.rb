@@ -2,19 +2,19 @@
 class JustTalk < Formula
   desc "Desktop voice input with global hotkeys and streaming ASR"
   homepage "https://github.com/Aono255/just-talk-go"
-  version "0.1.14"
+  version "0.1.15"
   license "GPL-3.0-only"
 
   depends_on macos: :sequoia
 
   on_arm do
-    url "https://github.com/Aono255/just-talk-go/releases/download/v0.1.14/just-talk_darwin_arm64.tar.gz"
-    sha256 "b106d7b7005fef446383bbbb258d4c5b618aa6ffa99cdf32bac37dbc8a9b1335"
+    url "https://github.com/Aono255/just-talk-go/releases/download/v0.1.15/just-talk_darwin_arm64.tar.gz"
+    sha256 "f19926a007f75ba6c0d70b9220f09c0de890db4eff72f94b28d03af3e2c5d8f4"
   end
 
   on_intel do
-    url "https://github.com/Aono255/just-talk-go/releases/download/v0.1.14/just-talk_darwin_amd64.tar.gz"
-    sha256 "b28848264f6196c1af83c3117f5423cbe0ed48a68af79027b472e527a26bb09a"
+    url "https://github.com/Aono255/just-talk-go/releases/download/v0.1.15/just-talk_darwin_amd64.tar.gz"
+    sha256 "37502eb0a26b6d2359f0ba49213dddc933b4ca00ad87bd57933617983eab4ae8"
   end
 
   def install
