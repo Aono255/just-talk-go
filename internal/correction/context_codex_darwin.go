@@ -34,7 +34,7 @@ func captureCodexDesktop(app applicationIdentity) (*Target, error) {
 		return nil, errors.New("无法读取当前 Codex 聊天上下文")
 	}
 	var messages []Message
-	if json.Unmarshal([]byte(C.GoString(data)), &messages) != nil {
+	if json.Unmarshal([]byte(C.GoString(data)), &messages) != nil || messages == nil {
 		C.jt_correction_release(native)
 		return nil, errors.New("当前聊天上下文格式不正确")
 	}
@@ -46,10 +46,13 @@ func captureCodexDesktop(app applicationIdentity) (*Target, error) {
 			availableAssistants++
 		}
 	}
-	messages, err := Recent(messages)
-	if err != nil {
-		C.jt_correction_release(native)
-		return nil, err
+	if len(messages) > 0 {
+		var err error
+		messages, err = Recent(messages)
+		if err != nil {
+			C.jt_correction_release(native)
+			return nil, err
+		}
 	}
 	return &Target{Messages: messages, AvailableUsers: availableUsers, AvailableAssistants: availableAssistants, Close: func() { C.jt_correction_release(native) },
 		Guard: func() error {

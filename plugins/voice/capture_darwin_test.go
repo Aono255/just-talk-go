@@ -33,6 +33,19 @@ func TestDarwinCaptureBuffersAndStop(t *testing.T) {
 }
 
 const darwinCaptureTest = `
+#import <CoreAudio/CoreAudio.h>
+static OSStatus queryStatus = noErr;
+static AudioDeviceID fakeInput = kAudioObjectUnknown;
+static int inputQueries = 0, uidQueries = 0;
+static OSStatus queryInput(AudioObjectID object, const AudioObjectPropertyAddress *address,
+    UInt32 qualifierSize, const void *qualifier, UInt32 *size, void *data) {
+    (void)object; (void)qualifierSize; (void)qualifier; (void)size;
+    if (address->mSelector == kAudioHardwarePropertyDefaultInputDevice) {
+        inputQueries++; *(AudioDeviceID *)data = fakeInput; return queryStatus;
+    }
+    uidQueries++; *(CFStringRef *)data = NULL; return noErr;
+}
+#define AudioObjectGetPropertyData queryInput
 #include "capture_darwin.m"
 #include <unistd.h>
 #define CHECK(x, message) do { if (!(x)) { fprintf(stderr, "%s\n", message); return 1; } } while (0)
@@ -111,6 +124,29 @@ int main(void) {
               "consumer overflow must preserve audio captured before the error");
         CHECK([rec read:bytes size:sizeof(bytes) error:error errorSize:sizeof(error)] == -1,
               "consumer overflow must be reported instead of silently dropping audio");
+        [rec stop]; [rec release];
+
+        jt_capture_start_report_t report = {0};
+        rec = [[JTCapture alloc] init];
+        CHECK(![rec configure:&report], "no input should fail before creating an audio session");
+        CHECK([rec read:bytes size:sizeof(bytes) error:error errorSize:sizeof(error)] == -1 &&
+              strstr(error, "未检测到麦克风"), "missing input needs an actionable message");
+        CHECK(inputQueries == 1 && uidQueries == 0, "missing input should not query a device UID");
+        [rec stop]; [rec release];
+
+        queryStatus = -123;
+        rec = [[JTCapture alloc] init];
+        CHECK(![rec configure:&report], "query errors must not be classified as missing input");
+        CHECK([rec read:bytes size:sizeof(bytes) error:error errorSize:sizeof(error)] == -1 &&
+              strstr(error, "-123") && !strstr(error, "未检测到麦克风"), "preserve system query error");
+        [rec stop]; [rec release];
+
+        queryStatus = noErr; fakeInput = 42;
+        rec = [[JTCapture alloc] init];
+        CHECK(![rec configure:&report], "synthetic UID is deliberately unavailable");
+        CHECK(inputQueries == 3 && uidQueries == 1, "next attempt must requery the newly connected device");
+        CHECK([rec read:bytes size:sizeof(bytes) error:error errorSize:sizeof(error)] == -1 &&
+              strstr(error, "读取麦克风标识失败"), "new attempt should advance past missing-device check");
         [rec stop]; [rec release];
     }
     return 0;

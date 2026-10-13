@@ -111,14 +111,38 @@ func TestExpiredStopTimerCannotStopNewOrResumedRecording(t *testing.T) {
 	t.Cleanup(eng.Stop)
 	rec := NewRecorder(logger, 1)
 	plugin.recorder, plugin.recording, plugin.stopping, plugin.sessionGen = rec, true, true, 2
-	plugin.stopRecordingAsync(1)
+	plugin.stopRecordingAsync(1, 0)
 	if !plugin.recording || plugin.recorder != rec {
 		t.Fatal("old stop timer detached a newer recording")
 	}
 	plugin.stopping = false
-	plugin.stopRecordingAsync(2)
+	plugin.stopRecordingAsync(2, 0)
 	if !plugin.recording || plugin.recorder != rec {
 		t.Fatal("canceled stop timer detached a resumed recording")
+	}
+}
+
+func TestOldTimerCannotStopRearmedDelayInSameRecording(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	eng := engine.New(hotkey.NewMockProvider(), config.Default(), logger)
+	p := NewVoicePlugin()
+	if err := eng.LoadPlugin(p); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(eng.Stop)
+	rec := NewRecorder(logger, 1)
+	p.recorder, p.recording, p.sessionGen, p.stopDelayMs = rec, true, 7, 3600000
+	p.startStopDelay()
+	oldSession := p.sessionGen
+	oldEpoch := p.stopEpoch
+	// An expired AfterFunc may already be queued for p.mu when Stop returns.
+	p.cancelStopDelay()
+	p.startStopDelay()
+	p.stopRecordingAsync(oldSession, oldEpoch)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.recording || !p.stopping || p.recorder != rec {
+		t.Fatal("old callback ended the new delay in the same recording")
 	}
 }
 

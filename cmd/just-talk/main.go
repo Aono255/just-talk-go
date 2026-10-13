@@ -45,6 +45,7 @@ func main() {
 	focusHelper := flag.Bool("focus-helper", false, "internal: query frontmost application once")
 	showMemory := flag.Bool("show-correction-memory", false, "show locally learned correction references")
 	clearMemory := flag.Bool("clear-correction-memory", false, "clear locally learned correction references")
+	memoryGroup := flag.String("memory-group", "input", "memory group for show/clear: input, en, ja")
 	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
@@ -110,13 +111,24 @@ func main() {
 		return
 	}
 	if *showMemory || *clearMemory {
-		path := voice.CorrectionMemoryPath()
+		language := *memoryGroup
+		if language == "input" {
+			language = ""
+		} else if language != "en" && language != "ja" {
+			fmt.Fprintln(os.Stderr, "记忆分组请选择 input、en 或 ja")
+			os.Exit(1)
+		}
+		path, err := voice.InputMemoryPath(language)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		if *clearMemory {
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				fmt.Fprintln(os.Stderr, "清空自学习记忆失败:", err)
 				os.Exit(1)
 			}
-			fmt.Println("已清空输入自学习记忆；AI 术语、热词和配置保持原样。")
+			fmt.Printf("已清空%s记忆；其他分组、AI 术语、热词和配置保持原样。\n", voice.MemoryGroupName(language))
 			return
 		}
 		notes, err := correction.LoadMemory(path)
@@ -124,7 +136,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "读取自学习记忆失败:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("输入自学习记忆 %d 条：\n", len(notes))
+		fmt.Printf("%s自学习记忆 %d 条：\n", voice.MemoryGroupName(language), len(notes))
 		for i, note := range notes {
 			fmt.Printf("%d. %s\n", i+1, note)
 		}

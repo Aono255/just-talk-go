@@ -17,8 +17,17 @@ func (p *VoicePlugin) correctionSessionCurrent(sessionID uint64) bool {
 }
 
 func (p *VoicePlugin) copyTranscriptText(text string) error {
+	return p.copyTranscriptTextChecked(text, nil)
+}
+
+func (p *VoicePlugin) copyTranscriptTextChecked(text string, guard func() error) error {
 	p.outputMu.Lock()
 	defer p.outputMu.Unlock()
+	if guard != nil {
+		if err := guard(); err != nil {
+			return err
+		}
+	}
 	if p.correctionClipboard != nil {
 		return p.correctionClipboard(text)
 	}
@@ -48,13 +57,13 @@ func (p *VoicePlugin) pasteTranscript(text string, guard func() error, delivered
 
 func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 	// Preserve ordinary voice delivery when no input-learning binding is needed.
-	if !session.correction.Enabled && (!session.autoSubmit || !correction.LearningReady(session.correction)) {
-		p.dispatchTextOutput(text, session.autoSubmit)
+	if !session.correction.Enabled && session.translation == "" && (!session.autoSubmit || !correction.LearningReady(session.correction)) {
+		p.dispatchTextOutput(session, text)
 		return
 	}
 	if !p.correctionSessionCurrent(session.sessionID) {
-		if !session.correction.Enabled {
-			p.dispatchTextOutput(text, session.autoSubmit)
+		if !session.correction.Enabled && session.translation == "" {
+			p.dispatchTextOutput(session, text)
 		}
 		return
 	}
@@ -78,8 +87,8 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 			input.Close()
 		}
 	}()
-	model := session.correction.Enabled
-	if model && session.correction.Context {
+	model := session.correction.Enabled || session.translation != ""
+	if session.correction.Enabled && session.correction.Context {
 		capture := p.correctionCapture
 		if capture == nil {
 			capture = correction.Capture
@@ -101,7 +110,7 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 		var err error
 		destination, err = capture()
 		if err != nil {
-			if !errors.Is(err, correction.ErrUnsupportedInput) {
+			if session.translation != "" || !errors.Is(err, correction.ErrUnsupportedInput) {
 				p.correctionFailed(session.sessionID, err)
 				return
 			}
@@ -163,11 +172,22 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 			p.correctionCancels = make(map[uint64]context.CancelFunc)
 		}
 		p.correctionCancels[session.sessionID] = cancel
+		if session.translation != "" {
+			if p.translatingSessions == nil {
+				p.translatingSessions = make(map[uint64]string)
+			}
+			action := "正在翻译为"
+			if session.correction.Enabled {
+				action = "正在整理并翻译为"
+			}
+			p.translatingSessions[session.sessionID] = action + correction.TranslationLanguage(session.translation)
+		}
 		p.publishStatusLocked()
 		p.mu.Unlock()
 		defer func() {
 			p.mu.Lock()
 			delete(p.correctionCancels, session.sessionID)
+			delete(p.translatingSessions, session.sessionID)
 			p.publishStatusLocked()
 			p.mu.Unlock()
 		}()
@@ -176,7 +196,10 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 			return
 		}
 		var messages []correction.Message
-		notes := p.sharedMemory(session.correction.Learning)
+		var notes []string
+		if session.correction.Enabled {
+			notes = p.sharedMemory(session.correction.Learning, "")
+		}
 		if target != nil {
 			messages = target.Messages
 			users, assistants, chars := 0, 0, 0
@@ -190,12 +213,21 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 			}
 			p.logger.Info("correction context", "source", target.Source.ID, "available_user_messages", target.AvailableUsers,
 				"available_assistant_messages", target.AvailableAssistants, "user_messages", users, "assistant_messages", assistants, "context_chars", chars)
-			pout("✨ 上下文修正 · %s · 用户 %d / 助手 %d · %d 字符", target.Source.Name, users, assistants, chars)
-		} else {
-			pout("✨ AI 输入修正 · 共享记忆 %d 条", len(notes))
+			pout("✨ 上下文 · %s · 用户 %d / 助手 %d · %d 字符", target.Source.Name, users, assistants, chars)
 		}
 		var err error
-		output, err = correction.Correct(ctx, session.correction, text, messages, session.hotwords, notes)
+		if session.translation != "" {
+			translationNotes := p.sharedMemory(session.correction.Learning, session.translation)
+			action := "翻译"
+			if session.correction.Enabled {
+				action = "整理并翻译"
+			}
+			pout("🌐 %s为%s · 一次模型请求 · 普通记忆 %d / 译文记忆 %d 条", action, correction.TranslationLanguage(session.translation), len(notes), len(translationNotes))
+			output, err = correction.Translate(ctx, session.correction, text, session.translation, messages, session.hotwords, notes, translationNotes)
+		} else {
+			pout("✨ AI 输入修正 · 普通记忆 %d 条", len(notes))
+			output, err = correction.Correct(ctx, session.correction, text, messages, session.hotwords, notes)
+		}
 		if ctx.Err() != nil || !p.correctionSessionCurrent(session.sessionID) {
 			return
 		}
@@ -203,6 +235,7 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 			p.correctionFailed(session.sessionID, err)
 			return
 		}
+
 	}
 	var err error
 	if session.autoSubmit {
@@ -214,7 +247,7 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 	} else {
 		err = guard()
 		if err == nil && output != text {
-			err = p.copyTranscriptText(output)
+			err = p.copyTranscriptTextChecked(output, guard)
 		}
 	}
 	if err != nil {
@@ -230,7 +263,11 @@ func (p *VoicePlugin) outputTranscript(session *recordingSession, text string) {
 	p.updateTranscript(session.sessionID, output)
 	if model {
 		p.logger.Info("correction completed", "model", session.correction.Model, "duration_ms", time.Since(started).Milliseconds(), "text_len", len(output))
-		pout("✨ 已纠错整理 (%dms)", time.Since(started).Milliseconds())
+		if session.translation != "" {
+			pout("🌐 已翻译为%s (%dms)", correction.TranslationLanguage(session.translation), time.Since(started).Milliseconds())
+		} else {
+			pout("✨ 已纠错整理 (%dms)", time.Since(started).Milliseconds())
+		}
 	}
 	if session.autoSubmit {
 		pout("✅ 已上屏")
@@ -244,6 +281,6 @@ func (p *VoicePlugin) correctionFailed(sessionID uint64, err error) {
 		return
 	}
 	p.logger.Warn("correction or paste failed", "session_id", sessionID, "error", err)
-	pout("❌ 纠错或上屏未完成: %s；原始识别已复制", err)
-	p.publishError("纠错未上屏: "+shortError(err)+"；可粘贴原始识别", sessionID)
+	pout("❌ 输入处理或上屏未完成: %s；原始识别已复制", err)
+	p.publishError("处理未上屏: "+shortError(err)+"；可粘贴原始识别", sessionID)
 }

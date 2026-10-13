@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -48,6 +49,26 @@ func CorrectionMemoryPath() string {
 	return filepath.Join(filepath.Dir(statsPath()), "correction-memory.json")
 }
 
+// Scope comes from the recording snapshot, never from model-generated notes.
+// Keep the original file and format intact; translation groups start empty.
+func InputMemoryPath(language string) (string, error) {
+	switch language {
+	case "":
+		return CorrectionMemoryPath(), nil
+	case "en", "ja":
+		return filepath.Join(filepath.Dir(statsPath()), "translation-memory."+language+".json"), nil
+	default:
+		return "", fmt.Errorf("不支持的记忆分组：%s", language)
+	}
+}
+
+func MemoryGroupName(language string) string {
+	if language == "" {
+		return "普通输入"
+	}
+	return correction.TranslationLanguage(language) + "翻译"
+}
+
 // Caller holds p.mu and learningCommitMu. The second lock orders disable/quit
 // against file commits without holding the voice-state mutex during disk I/O.
 func (p *VoicePlugin) stopLearningLocked() {
@@ -91,14 +112,19 @@ func (p *VoicePlugin) configureLearningLocked(cfg config.CorrectionConfig) {
 	}
 }
 
-func (p *VoicePlugin) sharedMemory(enabled bool) []string {
+func (p *VoicePlugin) sharedMemory(enabled bool, language string) []string {
 	if !enabled {
 		return nil
 	}
-	notes, err := correction.LoadMemory(CorrectionMemoryPath())
+	path, err := InputMemoryPath(language)
+	if err != nil {
+		p.logger.Warn("invalid memory scope", "error", err)
+		return nil
+	}
+	notes, err := correction.LoadMemory(path)
 	if err != nil {
 		p.logger.Warn("input memory load failed", "error", err)
-		pout("🧠 记忆读取失败；本次输入修正继续")
+		pout("🧠 %s记忆读取失败；本次输入处理继续", MemoryGroupName(language))
 		return nil
 	}
 	return notes
@@ -130,7 +156,7 @@ func (p *VoicePlugin) startLearning(session *recordingSession, input *correction
 		return false
 	}
 	ctx, cancel := context.WithCancel(p.learningContext)
-	watch := &learningWatch{revision: correction.NewRevision(input, raw, output), cancel: cancel,
+	watch := &learningWatch{revision: correction.NewRevision(input, raw, output, session.translation), cancel: cancel,
 		context: p.learningContext, cfg: session.correction, hotwords: session.hotwords, epoch: p.learningEpoch,
 		started: time.Now(), confirm: make(chan time.Time, 1)}
 	p.learningWatch = watch
@@ -226,7 +252,16 @@ func (p *VoicePlugin) learnRevision(watch *learningWatch, feedback *correction.F
 	if watch.context.Err() != nil {
 		return
 	}
-	notes := p.sharedMemory(true)
+	path, err := InputMemoryPath(feedback.Language)
+	if err != nil {
+		p.logger.Warn("invalid learning scope", "error", err)
+		return
+	}
+	notes, err := correction.LoadMemory(path)
+	if err != nil {
+		pout("🧠 %s自学习未完成：%s", MemoryGroupName(feedback.Language), err)
+		return
+	}
 	updates, err := correction.Learn(watch.context, watch.cfg, feedback, notes, watch.hotwords)
 	if err != nil {
 		if watch.context.Err() == nil {
@@ -247,12 +282,12 @@ func (p *VoicePlugin) learnRevision(watch *learningWatch, feedback *correction.F
 	if !current {
 		return
 	}
-	count, err := correction.Remember(CorrectionMemoryPath(), updates)
+	count, err := correction.Remember(path, updates)
 	if err != nil {
 		p.logger.Warn("input memory save failed", "error", err)
 		pout("🧠 自学习记忆保存失败")
 		return
 	}
-	p.logger.Info("input memory updated", "notes", count, "updates", len(updates))
-	pout("🧠 自学习记忆 %d 条 · 本次提炼 %d 条", count, len(updates))
+	p.logger.Info("input memory updated", "scope", feedback.Language, "notes", count, "updates", len(updates))
+	pout("🧠 %s记忆 %d 条 · 本次提炼 %d 条", MemoryGroupName(feedback.Language), count, len(updates))
 }

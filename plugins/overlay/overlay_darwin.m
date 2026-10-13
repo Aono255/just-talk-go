@@ -51,6 +51,8 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
 - (void)stopAnimation;
 @end
 
+static BOOL jt_aiPhase(NSString *phase) { return [phase isEqualToString:@"FIX"] || [phase isEqualToString:@"TRN"]; }
+
 @implementation JTOverlayView
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self=[super initWithFrame:frame])) {
@@ -102,9 +104,9 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
     CFTimeInterval now=CACurrentMediaTime();
     BOOL changed=![label isEqualToString:newLabel];
     if (changed) {
-        previousAI=[label isEqualToString:@"FIX"];
+        previousAI=jt_aiPhase(label);
         phaseAt=now;
-        if ([newLabel isEqualToString:@"FIX"]) {
+        if (jt_aiPhase(newLabel)) {
             [originalTranscript release]; originalTranscript=[text copy];
         } else if ([newLabel isEqualToString:@"CON"] || [newLabel isEqualToString:@"REC"]) {
             [originalTranscript release]; originalTranscript=nil;
@@ -162,16 +164,16 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
     [owner->panel setAlphaValue:alpha];
     jt_overlay_move(owner);
     [self setNeedsDisplay:YES];
-    BOOL busy=[@[@"CON",@"REC",@"STP",@"WAI",@"FIX"] containsObject:label];
+    BOOL busy=[@[@"CON",@"REC",@"STP",@"WAI",@"FIX",@"TRN"] containsObject:label];
     if (!hiding && now-fmax(fmax(phaseAt,sizeAt),appearAt)>0.35 && (!busy || reducedMotion)) [self stopAnimation];
 }
 - (NSString *)title {
     return [@{@"CON":@"准备中",@"REC":@"录音中",@"STP":@"收尾中",@"WAI":@"识别中",
-              @"FIX":@"AI 整理中",@"DONE":@"已完成",@"ERR":@"处理失败",@"IDL":@"待机"} objectForKey:label]?:label;
+              @"FIX":@"AI 整理中",@"TRN":@"AI 翻译中",@"DONE":@"已完成",@"ERR":@"处理失败",@"IDL":@"待机"} objectForKey:label]?:label;
 }
 - (NSColor *)accent {
     if ([label isEqualToString:@"REC"]) return jt_rgb(255,115,127,1);
-    if ([label isEqualToString:@"FIX"]) return jt_rgb(183,161,255,1);
+    if (jt_aiPhase(label)) return jt_rgb(183,161,255,1);
     if ([label isEqualToString:@"DONE"]) return jt_rgb(115,225,182,1);
     if ([label isEqualToString:@"ERR"]) return jt_rgb(255,177,111,1);
     if ([label isEqualToString:@"IDL"]) return jt_rgb(145,145,145,1);
@@ -194,11 +196,11 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
         }
         return;
     }
-    NSString *name=[label isEqualToString:@"FIX"]?@"sparkles":([label isEqualToString:@"DONE"]?@"checkmark":([label isEqualToString:@"ERR"]?@"exclamationmark":@"mic"));
+    NSString *name=jt_aiPhase(label)?@"sparkles":([label isEqualToString:@"DONE"]?@"checkmark":([label isEqualToString:@"ERR"]?@"exclamationmark":@"mic"));
     NSImageSymbolConfiguration *configuration=[[NSImageSymbolConfiguration configurationWithPointSize:19*scale weight:NSFontWeightMedium]
         configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[color]]];
     NSImage *image=[[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil] imageWithSymbolConfiguration:configuration];
-    CGFloat opacity=[label isEqualToString:@"FIX"]&&!reducedMotion?0.72+0.28*(sin(time*2.7)+1)/2:1;
+    CGFloat opacity=jt_aiPhase(label)&&!reducedMotion?0.72+0.28*(sin(time*2.7)+1)/2:1;
     [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:opacity respectFlipped:YES hints:nil];
 }
 - (void)drawRim:(NSRect)rect radius:(CGFloat)radius time:(double)time opacity:(CGFloat)opacity {
@@ -233,7 +235,7 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
     NSBezierPath *pill=[NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius];
     double time=CACurrentMediaTime()-phaseAt;
     CGFloat entry=reducedMotion?1:jt_smooth(time/0.25);
-    CGFloat emphasis=[label isEqualToString:@"FIX"]?entry:(previousAI?1-entry:0);
+    CGFloat emphasis=jt_aiPhase(label)?entry:(previousAI?1-entry:0);
     [NSGraphicsContext saveGraphicsState]; [pill addClip];
     NSGradient *background=[[[NSGradient alloc] initWithColors:@[jt_rgb(32+11*emphasis,34+3*emphasis,44+33*emphasis,1),jt_rgb(22,24,31,1)]] autorelease];
     [background drawInRect:rect angle:0]; [NSGraphicsContext restoreGraphicsState];
@@ -242,15 +244,15 @@ static void jt_text(NSString *text, NSRect rect, CGFloat size, NSColor *color, N
     NSRect icon=NSMakeRect(wide?21*scale:NSMidX(rect)-49*scale,17*scale,19*scale,19*scale);
     [self drawIcon:icon time:time];
     jt_text([self title],NSMakeRect(NSMaxX(icon)+10*scale,16*scale,rect.size.width-78*scale,24*scale),14*scale,
-        [label isEqualToString:@"FIX"]?jt_rgb(210,198,255,1):jt_rgb(244,245,250,1),NSFontWeightSemibold);
+        jt_aiPhase(label)?jt_rgb(210,198,255,1):jt_rgb(244,245,250,1),NSFontWeightSemibold);
     if (!wide) return;
-    if ([label isEqualToString:@"FIX"]) {
+    if (jt_aiPhase(label)) {
         NSRect badge=NSMakeRect(rect.size.width-89*scale,15*scale,69*scale,23*scale);
         [jt_rgb(157,133,245,0.13) setFill]; [[NSBezierPath bezierPathWithRoundedRect:badge xRadius:7*scale yRadius:7*scale] fill];
-        jt_text(@"智能纠错",NSInsetRect(badge,8*scale,4*scale),10*scale,jt_rgb(194,177,255,1),NSFontWeightMedium);
+        jt_text([label isEqualToString:@"TRN"]?@"语音翻译":@"智能纠错",NSInsetRect(badge,8*scale,4*scale),10*scale,jt_rgb(194,177,255,1),NSFontWeightMedium);
     }
     NSMutableAttributedString *body=[[[NSMutableAttributedString alloc] initWithString:caption attributes:[self bodyAttributes]] autorelease];
-    if ([label isEqualToString:@"FIX"]) [body addAttribute:NSForegroundColorAttributeName value:jt_rgb(187,181,207,1) range:NSMakeRange(0,body.length)];
+    if (jt_aiPhase(label)) [body addAttribute:NSForegroundColorAttributeName value:jt_rgb(187,181,207,1) range:NSMakeRange(0,body.length)];
     if ([label isEqualToString:@"DONE"]) {
         NSRange changed=[self changedRange];
         if (changed.location!=NSNotFound) {

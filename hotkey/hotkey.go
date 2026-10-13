@@ -112,4 +112,11 @@ type Event struct {
 	Combo Combo
 	Type  EventType
 	Time  time.Time
+	// macOS native modifier snapshot. Notifications from the same physical
+	// event share a sequence, even when dispatched through different combos.
+	Modifiers Modifier
+	// Modifiers observed while this registered modifier-only combo was held.
+	// Release notifications retain this history until the next physical press.
+	ModifierHistory Modifier
+	Sequence        uint64
 }

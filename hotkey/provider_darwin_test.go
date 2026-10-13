@@ -8,7 +8,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestDarwinChordHistorySurvivesReleaseAndResetsNextPress(t *testing.T) {
+	base := Combo{Mods: ModAlt | ModSuper}
+	extra := Combo{Mods: ModAlt | ModSuper | ModShift}
+	p := &darwinProvider{tracker: NewKeyStateTracker(), activeModifierCombos: map[Combo]bool{base: false, extra: false}}
+	p.processFlagsChanged(KeySuper, base.Mods, time.Now())
+	p.processFlagsChanged(KeyShift, extra.Mods, time.Now())
+	p.processFlagsChanged(KeyShift, base.Mods, time.Now())
+	p.processFlagsChanged(KeyAlt, ModSuper, time.Now())
+	if p.modifierHistory[base] != extra.Mods {
+		t.Fatal("release lost previously pressed translation modifier")
+	}
+	p.processFlagsChanged(KeyAlt, base.Mods, time.Now())
+	if p.modifierHistory[base] != base.Mods {
+		t.Fatal("translation history leaked into next normal chord")
+	}
+}
 
 // Exercise the production C callback without creating a global event tap or
 // requiring Accessibility permission. cgo is not supported in Go test files,

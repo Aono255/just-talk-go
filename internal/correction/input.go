@@ -37,6 +37,7 @@ type Revision struct {
 	mu                sync.Mutex
 	input             *Input
 	original, output  string
+	language          string
 	observed, stopped bool
 	samples           []revisionSample
 }
@@ -46,8 +47,8 @@ type revisionSample struct {
 	at    time.Time
 }
 
-func NewRevision(input *Input, original, output string) *Revision {
-	return &Revision{input: input, original: original, output: output}
+func NewRevision(input *Input, original, output, language string) *Revision {
+	return &Revision{input: input, original: original, output: output, language: language}
 }
 
 func (r *Revision) Observe(value string, now time.Time) bool {
@@ -100,7 +101,7 @@ func (r *Revision) Confirm(at time.Time, current string) *Feedback {
 				return nil
 			}
 		}
-		return &Feedback{Draft: r.original, Corrected: r.output, Revised: text}
+		return &Feedback{Draft: r.original, Corrected: r.output, Revised: text, Language: r.language}
 	}
 	return nil
 }

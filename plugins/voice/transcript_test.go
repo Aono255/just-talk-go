@@ -11,6 +11,36 @@ import (
 	"github.com/c/just-talk-go/hotkey"
 )
 
+func TestCanceledFinishCannotConsumeNewPendingWork(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	eng := engine.New(hotkey.NewMockProvider(), config.Default(), logger)
+	p := NewVoicePlugin()
+	if err := eng.LoadPlugin(p); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(eng.Stop)
+	p.mu.Lock()
+	p.trackFinishLocked(&recordingSession{sessionID: 1})
+	p.mu.Unlock()
+	p.cancelRecording()
+	p.mu.Lock()
+	p.sessionID = 2
+	p.trackFinishLocked(&recordingSession{sessionID: 2})
+	p.mu.Unlock()
+	p.recordingSessionFinished(1)
+	if p.pendingDone != 1 {
+		t.Fatal("canceled old completion consumed the new pending count")
+	}
+	p.recordingSessionFinished(1) // duplicate/unknown completion cannot decrement.
+	if p.pendingDone != 1 {
+		t.Fatal("duplicate completion consumed pending work")
+	}
+	p.cancelRecording()
+	if !p.sessionCanceled(2) || p.pendingDone != 0 {
+		t.Fatal("Escape could not cancel the new session")
+	}
+}
+
 func TestTranscriptRejectsOldCanceledAndLateSessionResults(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng := engine.New(hotkey.NewMockProvider(), config.Default(), logger)

@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -269,6 +270,7 @@ type VoicePlugin struct {
 	holdReleased                 bool
 	userStopped                  bool
 	stopTimer                    *time.Timer
+	stopEpoch                    uint64
 	stopAt                       time.Time
 	startedAt                    time.Time
 	sessionID                    uint64
@@ -284,6 +286,11 @@ type VoicePlugin struct {
 	canceledSessions             map[uint64]struct{}
 	outputSessions               map[uint64]struct{}
 	sessionCorrection            config.CorrectionConfig
+	sessionTranslation           config.TranslationConfig
+	sessionTranslate             bool
+	translationCombo             hotkey.Combo
+	translationChord             translationChord
+	translatingSessions          map[uint64]string
 	sessionHotwords              []string
 	correctionCancels            map[uint64]context.CancelFunc
 	correctionCapture            func() (*correction.Target, error)
@@ -316,6 +323,7 @@ type recordingSession struct {
 	userStopped bool
 	startedAt   time.Time
 	correction  config.CorrectionConfig
+	translation string
 	hotwords    []string
 }
 
@@ -360,6 +368,13 @@ func (p *VoicePlugin) Stop() error {
 func (p *VoicePlugin) OnConfigReload(cfg *config.Config) error { return p.registerFromConfig(cfg) }
 
 func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
+	if err := correction.ValidateTranslation(cfg, runtime.GOOS); err != nil {
+		return err
+	}
+	var translationCombo hotkey.Combo
+	if cfg.Translation.Enabled {
+		translationCombo, _ = config.ParseHotkey(cfg.Translation.Hotkey)
+	}
 	p.learningCommitMu.Lock()
 	p.mu.Lock()
 	p.configureLearningLocked(cfg.Correction)
@@ -370,11 +385,17 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	if !vc.Enabled {
 		p.mu.Lock()
 		oldCombo := p.combo
+		oldTranslation := p.translationCombo
 		p.cleanupTransientHotkeysLocked()
 		p.combo = hotkey.Combo{}
+		p.translationCombo = hotkey.Combo{}
+		p.translationChord.held, p.translationChord.mayPromote = false, false
 		p.mu.Unlock()
 		if oldCombo.Key != hotkey.KeyNone || oldCombo.Mods != hotkey.ModNone {
 			p.env.UnregisterHotkey(oldCombo)
+		}
+		if oldTranslation.Mods != hotkey.ModNone {
+			p.env.UnregisterHotkey(oldTranslation)
 		}
 		p.logger.Info("voice disabled")
 		return nil
@@ -393,9 +414,14 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 
 	p.mu.Lock()
 	oldCombo := p.combo
+	oldTranslation := p.translationCombo
 	oldMode := p.mode
 	sameRegistration := oldCombo == combo && oldMode == mode
+	if !sameRegistration || oldTranslation != translationCombo {
+		p.translationChord.held, p.translationChord.mayPromote = false, false
+	}
 	p.combo = combo
+	p.translationCombo = translationCombo
 	p.mode = mode
 	p.autoSubmit = vc.AutoSubmit
 	p.stopDelayMs = vc.StopDelayMs
@@ -419,6 +445,16 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 		}
 		p.logger.Info("hotkey_registered", "combo", combo, "suppress", opts.Suppress)
 	}
+	if oldTranslation != translationCombo {
+		if oldTranslation.Mods != hotkey.ModNone {
+			p.env.UnregisterHotkey(oldTranslation)
+		}
+		if translationCombo.Mods != hotkey.ModNone {
+			if err := p.env.RegisterHotkeyWithOptions(translationCombo, hotkey.RegisterOptions{Suppress: false}, p.onHotkey); err != nil {
+				return fmt.Errorf("注册翻译热键失败：%w", err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -428,8 +464,9 @@ func (p *VoicePlugin) onHotkey(evt hotkey.Event) {
 	p.startEventWorker(p.env.Engine().Context())
 	p.mu.Lock()
 	mode := p.mode
+	translationEnabled := p.cfg.Translation.Enabled
 	p.mu.Unlock()
-	if mode == "toggle" && evt.Type != hotkey.KeyDown {
+	if mode == "toggle" && evt.Type != hotkey.KeyDown && !translationEnabled {
 		p.logger.Debug("voice hotkey ignored", "type", evt.Type, "mode", mode)
 		return
 	}
@@ -472,32 +509,42 @@ func (p *VoicePlugin) eventLoop(ctx context.Context) {
 
 func (p *VoicePlugin) handleHotkey(evt hotkey.Event) {
 	markTUIHandled(evt)
+	if p.handleTranslationChord(evt) {
+		return
+	}
+	p.handleVoiceEdge(evt.Type, false)
+}
+
+func (p *VoicePlugin) handleVoiceEdge(edge hotkey.EventType, translate bool) {
 	p.mu.Lock()
 	mode, rec, stopping, starting := p.mode, p.recording, p.stopping, p.starting
 	p.mu.Unlock()
-	p.logger.Debug("voice hotkey handling", "type", evt.Type, "mode", mode, "recording", rec, "stopping", stopping)
+	p.logger.Debug("voice hotkey handling", "type", edge, "mode", mode, "recording", rec, "stopping", stopping)
 	switch mode {
 	case "hold":
-		if evt.Type == hotkey.KeyDown {
+		if edge == hotkey.KeyDown {
 			p.clearHoldReleased()
 			if stopping {
+				if translate {
+					p.promoteTranslation()
+				}
 				p.cancelStopDelay()
 			} else if !rec {
-				p.startRecording()
+				p.startRecordingWithTranslation(translate)
 			}
-		} else if evt.Type == hotkey.KeyUp {
+		} else if edge == hotkey.KeyUp {
 			p.markHoldReleased()
 		}
 	case "toggle":
-		if evt.Type != hotkey.KeyDown {
+		if edge != hotkey.KeyDown {
 			return
 		}
 		if starting {
 			p.cancelRecording()
 		} else if !rec {
-			p.startRecording()
+			p.startRecordingWithTranslation(translate)
 		} else if p.stopping {
-			p.restartRecording()
+			p.restartRecording(translate)
 		} else {
 			p.startStopDelay()
 		}
@@ -515,8 +562,10 @@ func (p *VoicePlugin) startStopDelay() {
 	delay := time.Duration(p.stopDelayMs) * time.Millisecond
 	p.stopAt = time.Now().Add(delay)
 	sessionGen := p.sessionGen
+	p.stopEpoch++
+	stopEpoch := p.stopEpoch
 	p.stopTimer = time.AfterFunc(delay, func() {
-		p.stopRecordingAsync(sessionGen)
+		p.stopRecordingAsync(sessionGen, stopEpoch)
 	})
 	p.publishStatusLocked()
 	pout("🎤 即将停止... (%dms 缓冲)", p.stopDelayMs)
@@ -569,6 +618,10 @@ func (p *VoicePlugin) markHoldReleased() {
 }
 
 func (p *VoicePlugin) startRecording() {
+	p.startRecordingWithTranslation(false)
+}
+
+func (p *VoicePlugin) startRecordingWithTranslation(translate bool) {
 	p.mu.Lock()
 	p.cancelStopDelayOnlyLocked()
 	if p.starting || p.recording || p.asrClient != nil {
@@ -597,6 +650,8 @@ func (p *VoicePlugin) startRecording() {
 	p.sessionID++
 	p.sessionGen++
 	p.sessionCorrection = p.cfg.Correction
+	p.sessionTranslation = p.cfg.Translation
+	p.sessionTranslate = translate && p.sessionTranslation.Enabled
 	p.sessionCorrection.Terms = append([]string(nil), p.cfg.Correction.Terms...)
 	p.sessionHotwords = append([]string(nil), asrCfg.Hotwords...)
 	for _, cancel := range p.correctionCancels {
@@ -723,7 +778,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	}()
 }
 
-func (p *VoicePlugin) restartRecording() {
+func (p *VoicePlugin) restartRecording(translate bool) {
 	p.mu.Lock()
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
@@ -732,7 +787,7 @@ func (p *VoicePlugin) restartRecording() {
 	if session != nil {
 		go p.finishRecordingSession(session)
 	}
-	p.startRecording()
+	p.startRecordingWithTranslation(translate)
 }
 
 func (p *VoicePlugin) cancelRecording() {
@@ -793,9 +848,11 @@ func (p *VoicePlugin) retryLastError() {
 	p.startRecording()
 }
 
-func (p *VoicePlugin) stopRecordingAsync(sessionGen uint64) {
+func (p *VoicePlugin) stopRecordingAsync(sessionGen, stopEpoch uint64) {
 	p.mu.Lock()
-	if p.sessionGen != sessionGen || !p.recording || !p.stopping {
+	// Stop cannot retract an AfterFunc already waiting on p.mu. A resume and
+	// another release keep sessionGen, but own a different delay epoch.
+	if p.sessionGen != sessionGen || p.stopEpoch != stopEpoch || !p.recording || !p.stopping {
 		p.mu.Unlock()
 		return
 	}
@@ -829,6 +886,9 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		startedAt:   p.startedAt,
 		correction:  p.sessionCorrection,
 		hotwords:    p.sessionHotwords,
+	}
+	if p.sessionTranslate {
+		session.translation = p.sessionTranslation.Language
 	}
 	p.sessionGen++
 	p.recorder, p.asrClient, p.asrCancel, p.audioDone = nil, nil, nil, nil
@@ -941,33 +1001,42 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	p.logger.Debug("finish session: done")
 }
 
-func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
-	go func() {
-		if autoSubmit {
-			if err := p.pasteTranscript(text, nil, nil); err != nil {
-				pout("❌ 上屏失败: %v", err)
-			} else {
-				pout("📋 已复制到剪贴板")
-				pout("✅ 已上屏")
-			}
-			return
+func (p *VoicePlugin) dispatchTextOutput(session *recordingSession, text string) {
+	// Already on the finish worker. Keep its session tracked until output ends,
+	// so Escape can cancel ordinary voice just as it cancels model processing.
+	guard := func() error {
+		if p.sessionCanceled(session.sessionID) || p.env.Engine().Context().Err() != nil {
+			return errors.New("已取消语音输出")
 		}
-
-		p.logger.Debug("text output: writing clipboard", "text_len", len(text))
-		if err := p.copyTranscriptText(text); err != nil {
-			pout("❌ 复制到剪贴板失败: %v", err)
+		return nil
+	}
+	if session.autoSubmit {
+		if err := p.pasteTranscript(text, guard, nil); err != nil {
+			pout("❌ 上屏未完成: %v", err)
 		} else {
 			pout("📋 已复制到剪贴板")
+			pout("✅ 已上屏")
 		}
-	}()
+		return
+	}
+	p.logger.Debug("text output: writing clipboard", "text_len", len(text))
+	if err := p.copyTranscriptTextChecked(text, guard); err != nil {
+		pout("❌ 复制未完成: %v", err)
+	} else {
+		pout("📋 已复制到剪贴板")
+	}
 }
 
 func (p *VoicePlugin) recordingSessionFinished(sessionID uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	_, tracked := p.finishingSessions[sessionID]
+	_, canceled := p.canceledSessions[sessionID]
 	delete(p.finishingSessions, sessionID)
 	delete(p.canceledSessions, sessionID)
-	if p.pendingDone > 0 {
+	// Cancellation already removed this session from the pending count.
+	// Its late completion must not consume a newer session's count.
+	if tracked && !canceled && p.pendingDone > 0 {
 		p.pendingDone--
 	}
 	if sessionID == p.sessionID && !p.recording && !p.starting && p.transcript != "" {
@@ -1033,6 +1102,12 @@ func (p *VoicePlugin) publishStatusLocked() {
 		state, detail = "connecting", "录音中，正在连接 ASR"
 	case p.recording:
 		state, detail = "recording", "录音中"
+		if p.sessionTranslate {
+			detail = "录音中 · 输出" + correction.TranslationLanguage(p.sessionTranslation.Language)
+		}
+	case len(p.translatingSessions) > 0:
+		state, detail = "translating", p.translatingSessions[p.sessionID]
+		stopping = true
 	case len(p.correctionCancels) > 0:
 		state, detail = "correcting", "正在进行 AI 输入修正"
 		stopping = true

@@ -12,11 +12,18 @@ import (
 )
 
 type Config struct {
-	path       string
-	Voice      VoiceConfig      `toml:"voice"`
-	Debug      DebugConfig      `toml:"debug"`
-	Overlay    OverlayConfig    `toml:"overlay"`
-	Correction CorrectionConfig `toml:"correction"`
+	path        string
+	Voice       VoiceConfig       `toml:"voice"`
+	Debug       DebugConfig       `toml:"debug"`
+	Overlay     OverlayConfig     `toml:"overlay"`
+	Correction  CorrectionConfig  `toml:"correction"`
+	Translation TranslationConfig `toml:"translation"`
+}
+
+type TranslationConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Hotkey   string `toml:"hotkey"`
+	Language string `toml:"language"`
 }
 
 type CorrectionConfig struct {
@@ -68,7 +75,8 @@ func Default() *Config {
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
 		},
-		Correction: CorrectionConfig{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-flash", TimeoutMS: 8000, Context: true, Learning: true},
+		Correction:  CorrectionConfig{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-flash", TimeoutMS: 8000, Context: true, Learning: true},
+		Translation: TranslationConfig{Hotkey: "Alt+Super+Shift", Language: "en"},
 	}
 }
 

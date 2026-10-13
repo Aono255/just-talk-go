@@ -6,7 +6,7 @@ import (
 )
 
 func TestContextAdaptersSelectBeforeReadingAndKeepBindingFailuresExplicit(t *testing.T) {
-	for _, mode := range []string{"unique", "unsupported", "ambiguous", "invalid_binding", "reader_failure"} {
+	for _, mode := range []string{"unique", "empty", "missing_messages", "unsupported", "ambiguous", "invalid_binding", "reader_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			reads, closed := 0, 0
 			adapter := contextAdapter{
@@ -15,6 +15,12 @@ func TestContextAdaptersSelectBeforeReadingAndKeepBindingFailuresExplicit(t *tes
 				Capture: func(applicationIdentity) (*Target, error) {
 					reads++
 					target := &Target{Messages: []Message{{Role: "user", Text: "会话"}}, Guard: func() error { return nil }, Close: func() { closed++ }}
+					if mode == "empty" {
+						target.Messages = []Message{}
+					}
+					if mode == "missing_messages" {
+						target.Messages = nil
+					}
 					if mode == "invalid_binding" {
 						target.Guard = nil
 					}
@@ -35,7 +41,7 @@ func TestContextAdaptersSelectBeforeReadingAndKeepBindingFailuresExplicit(t *tes
 				adapters = append(adapters, duplicate)
 			}
 			target, err := captureForApplication(app, adapters)
-			if mode == "unique" {
+			if mode == "unique" || mode == "empty" {
 				if err != nil || target.Source != adapter.Source || reads != 1 {
 					t.Fatalf("unique source: %v", err)
 				}

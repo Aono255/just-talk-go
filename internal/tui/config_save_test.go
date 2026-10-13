@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -10,6 +11,37 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestTranslationLanguageAndHotkeySaveWithExistingModel(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("translation hotkeys currently require macOS")
+	}
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("config.toml", []byte("[voice]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Correction.APIKey = "existing-test-key"
+	m := New(cfg)
+	for i := range m.fields {
+		switch m.fields[i].key {
+		case "translation_enabled":
+			m.cursor = i
+			m.handleKey(tea.KeyMsg{Type: tea.KeySpace})
+			if !m.fields[i].boolVal || m.editing {
+				t.Fatal("Space in navigation must toggle translation without entering edit mode")
+			}
+		case "translation_language":
+			m.fields[i].optIdx = 1
+		}
+	}
+	var saved *config.Config
+	m.OnSave = func(c *config.Config) error { saved = c; return nil }
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if saved == nil || !saved.Translation.Enabled || saved.Translation.Language != "ja" || saved.Translation.Hotkey != "Alt+Super+Shift" || saved.Correction.APIKey != "existing-test-key" {
+		t.Fatal("translation configuration was not saved independently")
+	}
+}
 
 func TestSavePassesNewCredentialsToReload(t *testing.T) {
 	t.Chdir(t.TempDir())

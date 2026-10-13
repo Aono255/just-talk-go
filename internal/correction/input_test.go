@@ -5,10 +5,21 @@ import (
 	"time"
 )
 
+func TestTranslatedRevisionCarriesOnlyItsSelectedOutputLanguage(t *testing.T) {
+	now := time.Now()
+	r := NewRevision(&Input{}, "请检查设备", "Please inspect device.", "en")
+	r.Observe("Please inspect device.", now)
+	r.Observe("Please check the device.", now.Add(time.Millisecond))
+	f := r.Confirm(now.Add(2*time.Millisecond), "Please check the device.")
+	if f == nil || f.Language != "en" || f.Revised != "Please check the device." {
+		t.Fatal("translation feedback lost its language scope")
+	}
+}
+
 func TestRevisionRequiresEnterAndUsesLatestPreEnterSnapshot(t *testing.T) {
 	now := time.Now()
 	input := &Input{Prefix: "原有🙂前缀", Suffix: "后缀"}
-	r := NewRevision(input, "P01", "P01")
+	r := NewRevision(input, "P01", "P01", "")
 	r.Observe(input.Prefix+"D01"+input.Suffix, now)
 	if r.Observed() {
 		t.Fatal("edit before observed paste accepted")
@@ -35,7 +46,7 @@ func TestRevisionRejectsUntouchedRevertedStaleAndCanceledSnapshots(t *testing.T)
 	for _, mode := range []string{"untouched", "reverted", "stale", "canceled", "new-input", "before-paste", "outside-span"} {
 		t.Run(mode, func(t *testing.T) {
 			now := time.Now()
-			r := NewRevision(&Input{Prefix: "pre:", Suffix: ":post"}, "P01", "P01")
+			r := NewRevision(&Input{Prefix: "pre:", Suffix: ":post"}, "P01", "P01", "")
 			if mode != "before-paste" {
 				r.Observe("pre:P01:post", now)
 			}

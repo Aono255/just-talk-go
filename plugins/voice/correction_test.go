@@ -131,12 +131,21 @@ func TestCorrectionRoutingKeepsOtherAppsUsableAndReportsCodexFocusErrors(t *test
 }
 
 func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T) {
-	for _, mode := range []string{"success", "changed", "error", "cancel"} {
+	for _, mode := range []string{"success", "empty", "empty-changed", "changed", "error", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("XDG_STATE_HOME", t.TempDir())
 			entered := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				io.Copy(io.Discard, r.Body)
+				var request struct{ Messages []struct{ Content string } }
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				if strings.HasPrefix(mode, "empty") {
+					var payload struct{ Context []correction.Message }
+					if len(request.Messages) != 2 || json.Unmarshal([]byte(request.Messages[1].Content), &payload) != nil || len(payload.Context) != 0 {
+						t.Error("empty conversation acquired unrelated context")
+					}
+				}
 				close(entered)
 				if mode == "cancel" {
 					select {
@@ -165,11 +174,15 @@ func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T
 			p.finishingSessions = map[uint64]struct{}{7: {}}
 			var guardCalls atomic.Int32
 			p.correctionCapture = func() (*correction.Target, error) {
+				messages := []correction.Message{{Role: "user", Text: "Codex 插件"}}
+				if strings.HasPrefix(mode, "empty") {
+					messages = []correction.Message{}
+				}
 				return &correction.Target{
 					Source:   correction.Source{ID: correction.CodexDesktopSourceID, Name: "Codex Desktop"},
-					Messages: []correction.Message{{Role: "user", Text: "Codex 插件"}}, Close: func() {},
+					Messages: messages, Close: func() {},
 					Guard: func() error {
-						if guardCalls.Add(1) > 1 && mode == "changed" {
+						if guardCalls.Add(1) > 1 && strings.HasSuffix(mode, "changed") {
 							return errors.New("当前聊天已切换")
 						}
 						return nil
@@ -195,17 +208,60 @@ func TestCorrectionPipelinePreservesRawTextAndCancelsWithoutPasting(t *testing.T
 			case <-time.After(2 * time.Second):
 				t.Fatal("correction prevented cancellation")
 			}
-			if mode == "success" {
+			if mode == "success" || mode == "empty" {
 				if copied != "适配 Codex，端口 5432。" || p.transcript != copied {
 					t.Fatal("corrected result was not delivered to preview and clipboard")
 				}
 			} else if copied != "适配扣得克斯，端口 5432。" {
 				t.Fatal("failed correction lost the raw transcript")
 			}
-			if (mode == "changed" || mode == "error") && !strings.Contains(p.lastError, "未上屏") {
+			if (strings.HasSuffix(mode, "changed") || mode == "error") && !strings.Contains(p.lastError, "未上屏") {
 				t.Fatal("failure was hidden")
 			}
 		})
+	}
+}
+
+func TestOrdinaryOutputRemainsCancelableUntilPaste(t *testing.T) {
+	cfg := config.Default()
+	cfg.Correction.Enabled, cfg.Correction.Learning = false, false
+	eng := engine.New(hotkey.NewMockProvider(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p := NewVoicePlugin()
+	if err := eng.LoadPlugin(p); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(eng.Stop)
+	p.sessionID = 1
+	p.trackFinishLocked(&recordingSession{sessionID: 1})
+	entered, release, pastedDone, done := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var pasted atomic.Int32
+	p.correctionPaste = func(_ string, guard func() error) error {
+		defer close(pastedDone)
+		close(entered)
+		<-release // native paste also waits between clipboard write and key posting.
+		if err := guard(); err != nil {
+			return err
+		}
+		pasted.Add(1)
+		return nil
+	}
+	go func() {
+		defer close(done)
+		defer p.recordingSessionFinished(1)
+		p.outputTranscript(&recordingSession{sessionID: 1, autoSubmit: true, correction: cfg.Correction}, "ordinary transcript")
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("paste did not start")
+	}
+	p.cancelRecording()
+	close(release)
+	<-pastedDone
+	<-done
+	if pasted.Load() != 0 {
+		t.Fatal("ordinary voice pasted after Escape before key posting")
 	}
 }
 

@@ -172,8 +172,12 @@ static void jt_capture_error(char *buffer, size_t size, NSString *message) {
     AudioDeviceID deviceID = kAudioObjectUnknown;
     UInt32 size = sizeof(deviceID);
     OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &property, 0, NULL, &size, &deviceID);
-    if (status != noErr || deviceID == kAudioObjectUnknown) {
+    if (status != noErr) {
         [self fail:[NSString stringWithFormat:@"读取默认麦克风失败: %d", (int)status]];
+        return NO;
+    }
+    if (deviceID == kAudioObjectUnknown) {
+        [self fail:@"未检测到麦克风，请连接耳机或外接麦克风后重试"];
         return NO;
     }
     property.mSelector = kAudioDevicePropertyDeviceUID;

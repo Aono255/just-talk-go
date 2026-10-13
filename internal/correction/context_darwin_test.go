@@ -84,7 +84,9 @@ func TestNativeContextExcludesPeerClocksAndFollowingToolActivity(t *testing.T) {
 	program := `#import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #include <assert.h>
+static AXError readError=kAXErrorSuccess;
 static AXError copyNode(AXUIElementRef element,CFArrayRef keys,AXCopyMultipleAttributeOptions options,CFArrayRef *out) {
+    if (readError!=kAXErrorSuccess) return readError;
     *out=(CFArrayRef)CFRetain(element);return kAXErrorSuccess;
 }
 #define AXUIElementCopyMultipleAttributeValues copyNode
@@ -118,6 +120,34 @@ int main(void) { @autoreleasepool {
     after=captureMessages((AXUIElementRef)main,(AXUIElementRef)editor,&anchor,&error);
     assert(!userBindingMatches(&target,anchor,userMessages(after),&error));
     assert(error && strstr(error,"正文已变化"));free(error);
+    error=NULL;anchor=NULL;
+    id emptyMain=n(@"AXGroup",@"",@[n(@"AXStaticText",@"新聊天",@[]),editor]);
+    NSArray *empty=captureMessages((AXUIElementRef)emptyMain,(AXUIElementRef)editor,&anchor,&error);
+    assert(empty && !empty.count && !anchor && !error);
+    jt_correction_target emptyTarget={0};emptyTarget.messages=empty;
+    assert(userBindingMatches(&emptyTarget,NULL,empty,&error));
+    // Appearance of either role after capture invalidates an empty binding.
+    assert(!userBindingMatches(&emptyTarget,NULL,@[@{@"role":@"assistant",@"text":@"new"}],&error));
+    free(error);error=NULL;
+    assert(!userBindingMatches(&emptyTarget,(AXUIElementRef)heading,before,&error));
+    free(error);error=NULL;
+    assert(!userBindingMatches(&target,NULL,empty,&error));
+    free(error);error=NULL;
+    // A role heading without a body is not accepted as a new chat.
+    for (NSString *label in @[@"You said:",@"ChatGPT said:"]) {
+        id incomplete=n(@"AXGroup",@"",@[n(@"AXHeading",label,@[]),editor]);
+        assert(!captureMessages((AXUIElementRef)incomplete,(AXUIElementRef)editor,&anchor,&error));
+        assert(error);free(error);error=NULL;
+    }
+    readError=kAXErrorCannotComplete;anchor=NULL;
+    assert(!captureMessages((AXUIElementRef)emptyMain,(AXUIElementRef)editor,&anchor,&error));
+    assert(error);free(error);
+    // Empty chats own no user anchor, including at native resource cleanup.
+    jt_correction_target *releaseTarget=calloc(1,sizeof(*releaseTarget));
+    releaseTarget->app=(AXUIElementRef)CFRetain((CFTypeRef)@"app");
+    releaseTarget->editor=(AXUIElementRef)CFRetain((CFTypeRef)@"editor");
+    releaseTarget->main=(AXUIElementRef)CFRetain((CFTypeRef)@"main");
+    jt_correction_release(releaseTarget);
 } return 0; }`
 	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
 		t.Fatal(err)

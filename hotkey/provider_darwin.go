@@ -168,7 +168,9 @@ type darwinProvider struct {
 	channels             map[Combo]chan<- Event
 	tracker              *KeyStateTracker
 	activeModifierCombos map[Combo]bool
+	modifierHistory      map[Combo]Modifier
 	stopped              bool
+	eventSequence        uint64
 
 	// Pipe for C→Go event bridge
 	pipeFd int
@@ -240,6 +242,7 @@ func (p *darwinProvider) Unregister(combo Combo) error {
 
 	p.tracker.Unwatch(combo)
 	delete(p.activeModifierCombos, combo)
+	delete(p.modifierHistory, combo)
 	close(ch)
 	delete(p.channels, combo)
 	return nil
@@ -370,6 +373,8 @@ func (p *darwinProvider) readPipe(ctx context.Context) {
 }
 
 func (p *darwinProvider) handleCGEvent() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	keycodeOff := int(C.bridge_keycode_offset)
 	flagsOff := int(C.bridge_flags_offset)
 	evtTypeOff := int(C.bridge_event_type_offset)
@@ -402,9 +407,10 @@ func (p *darwinProvider) handleCGEvent() {
 		events = p.processFlagsChanged(key, mods, now)
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.eventSequence++
 	for _, e := range events {
+		e.Modifiers, e.Sequence = mods, p.eventSequence
+		e.ModifierHistory = p.modifierHistory[e.Combo]
 		// Use flags from this native event for Enter confirmation, even if a
 		// modifier transition was missed by the generic key-state tracker.
 		if e.Combo == (Combo{Key: KeyEnter}) && mods != ModNone {
@@ -420,6 +426,9 @@ func (p *darwinProvider) handleCGEvent() {
 }
 
 func (p *darwinProvider) processFlagsChanged(key KeyCode, mods Modifier, now time.Time) []Event {
+	if p.modifierHistory == nil {
+		p.modifierHistory = make(map[Combo]Modifier)
+	}
 	var events []Event
 	if key != KeyNone {
 		// Keep the generic tracker state current for regular modifier+key combos.
@@ -431,6 +440,13 @@ func (p *darwinProvider) processFlagsChanged(key KeyCode, mods Modifier, now tim
 	}
 	for combo, active := range p.activeModifierCombos {
 		nowActive := mods&combo.Mods == combo.Mods
+		if nowActive {
+			if !active {
+				p.modifierHistory[combo] = mods
+			} else {
+				p.modifierHistory[combo] |= mods
+			}
+		}
 		switch {
 		case nowActive && !active:
 			p.activeModifierCombos[combo] = true

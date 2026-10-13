@@ -15,6 +15,7 @@ This [fork maintained by Aono255](https://github.com/Aono255/just-talk-go) is ba
 | Global voice input | `toggle`: press to start, press again to stop; `hold`: hold to record and release to stop |
 | Streaming recognition and paste | Doubao 1.0 / 2.0 with duration or concurrency resources; automatic paste or clipboard-only output. Automatic paste does not press Enter to send a message |
 | AI input correction | Disabled by default; macOS app/window-bound output shares terms and memory, using DeepSeek or an OpenAI-compatible service |
+| Voice translation | macOS three-modifier shortcut; English or Japanese output using the existing model and key |
 | Chat context | Optional extra context for AI input correction; currently Codex Desktop only |
 | Independent AI glossary | Project names, technical terms and abbreviations for the correction model, maintained separately from recognition hotwords |
 | Input learning | Learns from user revisions to this dictation’s pasted span; independent of chat adapters and sending |
@@ -105,7 +106,7 @@ Use `just-talk --doctor` to check Linux dependencies and permissions. Windows ne
 | --- | --- |
 | `j/k` or arrow keys | Select a setting; the list scrolls with the selection |
 | `e`, `i` or Enter | Edit the selected setting |
-| Space while editing a switch | Toggle on/off |
+| Space on a selected switch | Toggle in navigation or editing mode; press `s` to save from navigation |
 | `j/k` while editing a selection | Cycle recording mode, provider type and other options |
 | Enter while editing | Finish editing and save |
 | Escape while editing, then `s` | Finish editing, then save; Escape itself neither saves nor discards the edited field |
@@ -113,7 +114,7 @@ Use `just-talk --doctor` to check Linux dependencies and permissions. Windows ne
 | `l` | Expand/collapse logs |
 | `q` or `Ctrl+C` | Quit from navigation mode |
 
-During recording, recognition or correction, global Escape cancels the flow. During microphone startup it marks cancellation; resources are released after the system call returns. Errors remain visible for about 10 seconds. Global `R` during that period **starts a new recording**; it does not replay the last audio or retry the last model request.
+During recording, recognition, correction or pending ordinary voice output, global Escape cancels the flow. During microphone startup it marks cancellation; resources are released after the system call returns. Errors remain visible for about 10 seconds. Global `R` during that period **starts a new recording**; it does not replay the last audio or retry the last model request. Cancellation is checked before paste; key events already posted to the OS cannot be recalled.
 
 ### Hotkey, recording mode and stop delay
 
@@ -123,9 +124,22 @@ Supported shortcuts include modifier-only combinations, `F1`–`F24`, Tab, Enter
 
 Option maps to Alt; Command/Cmd/Win map to Super. Windows modifier combinations require the exact configured modifier set. Its low-level hook only observes key edges and does not consume or replay modifiers, preserving normal Alt, Win and Alt+Tab behavior.
 
+## Voice translation (macOS)
+
+Enable “语音翻译” in the TUI and choose English or Japanese under “翻译输出”. Translation shares the processing model, service URL and API key with correction. Existing configurations leave this entry disabled.
+
+- `Alt+Super` (⌥⌘): ordinary dictation in the original language.
+- `Alt+Super+Shift` (⌥⌘⇧): speech recognition → combined AI correction and translation → paste or copy.
+
+In hold mode, adding Shift upgrades the same recording without reopening the microphone. Releasing Shift first keeps translation selected; releasing either original modifier ends recording. Toggle mode still uses one press to start and another to stop; overlapping combo notifications do not count as two presses. The translation shortcut is editable but currently must add one modifier to the original two-modifier shortcut. For a base shortcut such as F9, change it to two modifiers or leave translation disabled.
+
+When correction is enabled, a single model request uses the transcript, glossary, enabled context and memory to correct recognition, remove spoken repetition and produce the final translation. No intermediate Chinese output is generated. With correction disabled, the request translates the transcript using the glossary and target-language memory, without chat context or ordinary correction memory. It uses the shared model timeout. The overlay displays “AI 翻译中” and previews the result. ASR language and translation output language are independent. Combining the stages removes one serial request; real latency still depends on the service and text length.
+
+The recording snapshots its language and model settings, so changes affect subsequent recordings. Escape, new recording and destination changes prevent late output; failures preserve the original transcript without switching providers. Learning from edits to a translation still requires plain Enter and supplies the selected output language to extraction, so the shortcut choice is not treated as a global language preference.
+
 ## Context correction (macOS)
 
-`[correction].enabled` controls AI input correction with shared model settings, terms and memory. `context` enables additional chat context and defaults to true when absent in existing configurations. Only Codex Desktop has a chat adapter; OMP and terminal sessions remain unimplemented. Codex excludes peer clock/status text outside grouped message bodies, preventing timer updates from being treated as user-message edits. Generic apps use independent window and input bindings, and learning no longer retains conversation resources or depends on a context source ID.
+`[correction].enabled` controls AI input correction with shared model settings, terms and memory. `context` enables additional chat context and defaults to true when absent in existing configurations. Only Codex Desktop has a chat adapter; OMP and terminal sessions remain unimplemented. A successful scan of a new Codex chat without message roles may provide empty context; correction and translation still use enabled terms and memory. The same application, main region, editor and draft remain bound, and the chat must still have no messages before paste. New messages, changed targets, read errors or role headings without any body stop output. Codex excludes peer clock/status text outside grouped message bodies, preventing timer updates from being treated as user-message edits. Generic apps use independent window and input bindings, and learning no longer retains conversation resources or depends on a context source ID.
 
 ### Configure DeepSeek or another model
 
@@ -142,9 +156,9 @@ Configure the model, enable “AI 输入修正”, and save. Enable chat context
 | --- | --- |
 | 模型服务类型 | `deepseek`; select `openai-compatible` for another compatible service |
 | 模型服务地址 | `https://api.deepseek.com`; other services use their own Base URL, possibly including `/v1`. Do not enter the complete `/chat/completions` URL |
-| 纠错模型 | `deepseek-flash`, or the model name provided by your service |
+| 处理模型 | `deepseek-flash`, or the model name provided by your service |
 | 模型 API Key | Enter the service's key locally; masked while viewing and editing |
-| 纠错超时(ms) | `8000` by default; allowed range `500`–`30000` |
+| 模型超时(ms) | `8000` by default; allowed range `500`–`30000` |
 | AI 纠错术语 | English or Chinese comma separators, e.g. `Codex, DeepSeek, SOCKS5, WebShell, ClickHouse` |
 | 上下文修正 | Enabled by default; adds chat context from a connected client when AI correction is enabled |
 | 输入自学习 | Enabled by default; independently active with valid model configuration, even when AI correction or chat context is off |
@@ -199,13 +213,23 @@ Unmatched chat clients use explicit input-only correction without reading anothe
 
 Each paste can produce at most one learning request. Only the bound input is observed, for up to ten minutes. Losing focus, timing out or starting the next paste discards unconfirmed edits. Samples are taken about every 50 ms; Enter rechecks the same app/window/editor and uses a pre-key snapshot no older than 500 ms if the app already cleared the field. This freshness limit is not an editing deadline. Clearing alone never confirms. Disabling learning, quitting or changing model service settings cancels work and prevents stale responses from committing. Untouched model output, unconfirmed paste and clipboard-only output do not create memory. Plain Enter is a revision-confirmation convention, not proof of successful sending. Send-button clicks and other send shortcuts do not confirm; Enter used to confirm an IME candidate cannot be distinguished universally. Immediate edits followed by Enter may fall between samples: mismatched live text is skipped, but a cleared field can only use the last sample and may miss the final instantaneous edit. Undo, paste, cut and deletion appear as text changes, without inferring their intent. Chat history is not read for learning. Raw/output/revised samples are limited to 2,000 characters each; input snapshots to 4,096 UTF-16 code units.
 
-At most 32 notes of 120 characters each are stored locally, without full samples or chat text, in `~/.local/state/just-talk/correction-memory.json` or `just-talk` under `XDG_STATE_HOME`. All AI-corrected applications can reuse these references; current context takes priority. This does not train model weights. Disabling input learning also excludes memory from correction requests. Learning failure does not block the current output.
+Memory has three groups, each capped at 32 notes of 120 characters, without full samples or chat text. Groups are shared across applications, not tied to a chat adapter. Files live in `~/.local/state/just-talk/` or `just-talk` under `XDG_STATE_HOME`:
+
+| Group | File | Use |
+|-------|------|-----|
+| Ordinary input | `correction-memory.json` | Keeps the existing format and file; used for correction and source interpretation in combined translation |
+| English translation | `translation-memory.en.json` | Learns only from edits to English output and is used only for English translation |
+| Japanese translation | `translation-memory.ja.json` | Learns only from edits to Japanese output and is used only for Japanese translation |
+
+Existing notes remain in ordinary input; no automatic migration or language classification occurs. Translation learning compares actual pasted output with the user revision, not Chinese with its translation. Raw recognition provides background only. The recording determines the group; later setting changes cannot reclassify earlier edits. Current context takes priority; this does not train model weights. Disabling learning excludes all memory from model requests. Extraction runs separately in the background after revision confirmation, adding no request before the current paste. Learning failure does not block output.
 
 ```bash
-just-talk --show-correction-memory
+just-talk --show-correction-memory                    # Ordinary input
+just-talk --show-correction-memory --memory-group en  # English translation
+just-talk --show-correction-memory --memory-group ja  # Japanese translation
 ```
 
-After quitting the running program, use `just-talk --clear-correction-memory` to clear learned notes. Manual hotwords, the AI glossary and keys are unaffected.
+After quitting the running program, `just-talk --clear-correction-memory` clears ordinary input notes. Add `--memory-group en` or `--memory-group ja` to clear only that translation group. Other groups, manual hotwords, glossary and keys are unaffected.
 
 ## Choosing between three vocabulary settings
 
@@ -298,6 +322,11 @@ position = "bottom-center"
 idle_visible = false
 scale = 1.0
 
+[translation]
+enabled = false                     # Three-modifier translation; macOS only
+hotkey = "Alt+Super+Shift"
+language = "en"                     # en English / ja Japanese
+
 [debug]
 enabled = false
 hotkeys = []
@@ -318,9 +347,9 @@ hotkeys = []
 | `just-talk --debug` | TUI hotkey receipt, queue and handling diagnostics |
 | `just-talk --backend wayland` / `--backend x11` | Force a Linux backend; also supports `JUST_TALK_BACKEND` |
 | `just-talk --install` | Install this binary into Linux/macOS `~/.local/bin` or Windows `%LOCALAPPDATA%\Programs\Just Talk` |
-| `just-talk --show-correction-memory` | Show compact local correction memories without recording, networking or reading configuration |
+| `just-talk --show-correction-memory` | Show ordinary input notes; add `--memory-group en/ja` for English/Japanese; no recording, networking or configuration access |
 | `just-talk --check-input` | Check the focused editable input after five seconds; no chat history, network or saved text |
-| `just-talk --clear-correction-memory` | Quit the running program first, then clear learned memories without changing hotwords, glossary or keys |
+| `just-talk --clear-correction-memory` | Quit first, then clear ordinary input notes; add `--memory-group en/ja` to clear only that translation group |
 
 Additional hotkey event logging without the TUI requires both `--debug` and `[debug].enabled = true`; `debug.hotkeys` selects the combinations to observe.
 
@@ -339,6 +368,10 @@ The system-wide AX focus query used in `v0.1.8` returned `-25204` immediately on
 The application's accessibility interface returned no focused element. This does not establish that the user failed to click the input or switched conversations. On-device comparison returned `-25212` initially, then six consecutive `AXTextArea` focus results from the same Codex process after querying its standard application role. The reader validates that role before retrieving focus. Initial no-value results have a 500 ms readiness budget for the same app, excluding time spent inside a blocking system call; ready inputs have no fixed delay. No screen-reader switches or system permissions are changed.
 
 Other `AX` error codes are also reported, separating read failures from draft/conversation checks performed after a valid focus is obtained. Keep the current draft focused and run `just-talk --check-context` from the terminal that launches Just Talk. Capture failure in a matched Codex client stops automatic paste and preserves the raw transcript, without context-free correction.
+
+### No microphone detected
+
+A computer without a built-in microphone needs a headset, USB microphone or another input device selected in system sound settings. Just Talk queries the default input on every recording attempt; connect the device and retry the shortcut without restarting solely because the previous attempt had no device. An error with a system status code indicates a query failure, not necessarily a missing microphone.
 
 ### No audio within 3 seconds after reconnecting a headset
 
@@ -364,7 +397,7 @@ The overlay has a two-line preview; full text is still pasted or copied. AI corr
 
 ### Where is my content sent
 
-Audio goes to Volcengine ASR. AI input correction sends the transcript, hotwords, terms and enabled shared memory to the configured model. Additional chat context is supplied only when enabled and a connected source matches, currently Codex Desktop. Independent learning sends the raw transcript, observed pasted text and user revision, plus terms and memory, without chat history. Full samples remain in memory and the request; only compact extracted notes are saved locally. The model key stays in local configuration and is used for request authentication, without being written to logs. ASR and correction use separate credentials.
+Audio goes to Volcengine ASR. AI correction sends the transcript, hotwords, glossary and enabled ordinary memory to the configured model. Chat context is included only when enabled and a connected source matches, currently Codex Desktop. Translation adds the target language and its translation memory to the same request and returns only the final translation. With correction disabled, it omits chat context, hotwords and ordinary memory. After a user revision, independent learning sends the raw transcript, pasted output, revision, output language if applicable, glossary, hotwords and same-group notes, without chat history. Full samples remain in memory and the request; only compact notes are stored locally. The model key stays in local configuration and is used for authentication, without being logged. ASR and the model use separate credentials.
 
 ## Build and maintenance
 

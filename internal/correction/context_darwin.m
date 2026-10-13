@@ -307,10 +307,12 @@ static BOOL scan(AXUIElementRef element, AXUIElementRef editor, int depth, NSUIn
 static NSArray *captureMessages(AXUIElementRef main, AXUIElementRef editor, AXUIElementRef *lastUserHeading,
                                char **error) {
     NSMutableArray *messages=[NSMutableArray array],*parts=[NSMutableArray array];
-    NSUInteger count=0; NSString *role=nil; int headingDepth=0;
+    NSUInteger count=0; NSString *role=nil; int headingDepth=-1;
     if (!scan(main,editor,0,&count,[NSDate timeIntervalSinceReferenceDate]+2,messages,parts,&role,&headingDepth,lastUserHeading,error)) return nil;
     flushMessage(messages,role,parts);
-    if (!messages.count) { fail(error,@"当前 Codex 聊天没有提供消息角色与正文，未执行无上下文纠错"); return nil; }
+    // A successful traversal without message headings is a valid empty chat.
+    // A heading without any body is incomplete, not an empty conversation.
+    if (!messages.count && headingDepth>=0) { fail(error,@"当前 Codex 聊天提供了消息角色但缺少正文，未使用不完整上下文"); return nil; }
     return messages;
 }
 
@@ -322,8 +324,13 @@ static NSArray *userMessages(NSArray *messages) {
 // AX object identity is a binding signal, not proof that the user switched
 // chats. Keep the existing guard, but report its actual observations separately.
 static BOOL userBindingMatches(jt_correction_target *target, AXUIElementRef anchor,
-                               NSArray *users, char **error) {
-    BOOL sameAnchor=anchor && CFEqual(anchor,target->userAnchor);
+                               NSArray *messages, char **error) {
+    if (!target->userAnchor && !target->messages.count) {
+        if (!anchor && !messages.count) return YES;
+        fail(error,@"纠错期间空聊天出现了消息，结果未上屏"); return NO;
+    }
+    NSArray *users=userMessages(messages);
+    BOOL sameAnchor=anchor && target->userAnchor && CFEqual(anchor,target->userAnchor);
     BOOL sameText=[users isEqual:target->messages];
     if (sameAnchor && sameText) return YES;
     NSString *reason=!anchor ? @"用户消息控件不可用" :
@@ -368,14 +375,14 @@ int jt_correction_capture(pid_t pid, jt_correction_target **out, char **data, ch
         AXUIElementRef userAnchor=NULL;
         NSArray *messages=captureMessages(main,editor,&userAnchor,error);
         if (!messages) { CFRelease(app); return -1; }
-        if (!userAnchor) { CFRelease(app); fail(error,@"当前聊天没有提供用户消息锚点，无法绑定自动上屏目标"); return -1; }
+        if (messages.count && !userAnchor) { CFRelease(app); fail(error,@"当前聊天没有提供用户消息锚点，无法绑定自动上屏目标"); return -1; }
         NSData *json=[NSJSONSerialization dataWithJSONObject:messages options:0 error:nil];
         if (!json) { CFRelease(app); fail(error,@"当前聊天无法转成文本上下文"); return -1; }
         jt_correction_target *target=calloc(1,sizeof(*target));
         if (!target) { CFRelease(app); fail(error,@"无法分配聊天读取资源"); return -1; }
         target->pid=pid; target->app=app;
         target->editor=(AXUIElementRef)CFRetain(editor); target->main=(AXUIElementRef)CFRetain(main);
-        target->userAnchor=(AXUIElementRef)CFRetain(userAnchor);
+        target->userAnchor=userAnchor ? (AXUIElementRef)CFRetain(userAnchor) : NULL;
         target->draft=[draft copy]; target->messages=[userMessages(messages) copy];
         *data=strdup([[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease].UTF8String);
         *out=target; return 1;
@@ -399,12 +406,13 @@ int jt_correction_guard(jt_correction_target *target, pid_t frontPid, char **err
         NSArray *messages=captureMessages(main,editor,&userAnchor,error);
         if (!messages) return 0;
         // 助手流式回复可继续增长；绑定用户消息的 AX 身份与正文，避免写入切换后的聊天。
-        return userBindingMatches(target,userAnchor,userMessages(messages),error) ? 1 : 0;
+        return userBindingMatches(target,userAnchor,messages,error) ? 1 : 0;
     }
 }
 
 void jt_correction_release(jt_correction_target *target) {
     if (!target) return;
-    CFRelease(target->app); CFRelease(target->editor); CFRelease(target->main); CFRelease(target->userAnchor);
+    CFRelease(target->app); CFRelease(target->editor); CFRelease(target->main);
+    if (target->userAnchor) CFRelease(target->userAnchor);
     [target->draft release]; [target->messages release]; free(target);
 }

@@ -64,7 +64,9 @@ func captureForApplication(app applicationIdentity, adapters []contextAdapter) (
 	}
 	adapter := adapters[match]
 	target, err := adapter.Capture(app)
-	if err != nil || target == nil || target.Guard == nil || target.Close == nil || len(target.Messages) == 0 {
+	// A non-nil empty slice denotes a successful read of an empty conversation.
+	// Nil still means the adapter failed to supply a result.
+	if err != nil || target == nil || target.Guard == nil || target.Close == nil || target.Messages == nil {
 		if target != nil && target.Close != nil {
 			target.Close()
 		}

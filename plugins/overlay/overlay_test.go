@@ -56,4 +56,9 @@ func TestOverlayUpdatesCaptionAndExpiresFinalPreview(t *testing.T) {
 	if b.text != s.Detail || b.label != "ERR" {
 		t.Fatal("error detail was hidden by the previous transcript")
 	}
+	s.State = "translating"
+	p.sync(s)
+	if b.label != "TRN" || !p.lastVisible {
+		t.Fatal("translation phase is not visible")
+	}
 }

@@ -126,6 +126,8 @@ func displayForStatus(status voice.TUIVoiceStatus, idleVisible bool) (string, st
 		return "WAI", statusColor{R: 255 << 8, G: 160 << 8, B: 70 << 8}, true
 	case "correcting":
 		return "FIX", statusColor{R: 125 << 8, G: 170 << 8, B: 255 << 8}, true
+	case "translating":
+		return "TRN", statusColor{R: 125 << 8, G: 170 << 8, B: 255 << 8}, true
 	case "error":
 		return "ERR", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	default:

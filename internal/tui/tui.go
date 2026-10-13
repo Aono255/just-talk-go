@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -76,6 +77,9 @@ func New(cfg *config.Config) *Model {
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
+		{label: "语音翻译", key: "translation_enabled", help: "macOS 三键翻译；沿用模型与 Key", fType: fToggle, boolVal: cfg.Translation.Enabled},
+		{label: "翻译热键", key: "translation_hotkey", help: "原双修饰键加一键，例如 Alt+Super+Shift", fType: fString, input: ti(cfg.Translation.Hotkey)},
+		{label: "翻译输出", key: "translation_language", help: "仅翻译热键生效，普通输入保留原语言", fType: fSelect, opts: []string{"en", "ja"}, optLabels: []string{"英文", "日文"}, optIdx: idxOf([]string{"en", "ja"}, cfg.Translation.Language)},
 		asrResourceField(vc.ResourceID),
 		{label: "App Key", key: "app_key", help: "火山 App ID", fType: fString, input: ti(vc.AppKey)},
 		{label: "Access Key", key: "access_key", help: "火山 Access Token", fType: fString, input: ti(vc.AccessKey)},
@@ -89,9 +93,9 @@ func New(cfg *config.Config) *Model {
 		{label: "AI 纠错术语", key: "correction_terms", help: "逗号分隔；仅供纠错模型参考，不传给语音识别", fType: fString, input: ti(strings.Join(cc.Terms, ", "))},
 		{label: "模型服务类型", key: "correction_provider", help: "DeepSeek 会关闭思考并启用 JSON 输出", fType: fSelect, opts: []string{"deepseek", "openai-compatible"}, optIdx: idxOf([]string{"deepseek", "openai-compatible"}, cc.Provider)},
 		{label: "模型服务地址", key: "correction_base_url", help: "OpenAI 兼容 Base URL，通常含 /v1", fType: fString, input: ti(cc.BaseURL)},
-		{label: "纠错模型", key: "correction_model", help: "服务商提供的模型名；优先使用快速非思考模型", fType: fString, input: ti(cc.Model)},
+		{label: "处理模型", key: "correction_model", help: "纠错、翻译与自学习共用；优先使用快速非思考模型", fType: fString, input: ti(cc.Model)},
 		{label: "模型 API Key", key: "correction_api_key", help: "只保存于本地配置，编辑时也隐藏", fType: fString, input: ti(cc.APIKey)},
-		{label: "纠错超时(ms)", key: "correction_timeout_ms", help: "500–30000；失败时保留原始识别，不自动上屏", fType: fString, input: ti(fmt.Sprint(cc.TimeoutMS))},
+		{label: "模型超时(ms)", key: "correction_timeout_ms", help: "每次纠错/翻译请求 500–30000；失败时保留原始识别", fType: fString, input: ti(fmt.Sprint(cc.TimeoutMS))},
 	}
 	for i := range fs {
 		if fs[i].key == "correction_api_key" {
@@ -214,6 +218,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Navigation mode
 	switch k {
+	case " ":
+		if m.cursor >= 0 && m.cursor < len(m.fields) && m.fields[m.cursor].fType == fToggle {
+			m.fields[m.cursor].boolVal = !m.fields[m.cursor].boolVal
+		}
 	case "q", "ctrl+c":
 		return tea.Quit
 	case "s":
@@ -265,6 +273,12 @@ func (m *Model) save() {
 			vc.PushToTalk = f.input.Value()
 		case "mode":
 			vc.Mode = f.opts[f.optIdx]
+		case "translation_enabled":
+			next.Translation.Enabled = f.boolVal
+		case "translation_hotkey":
+			next.Translation.Hotkey = strings.TrimSpace(f.input.Value())
+		case "translation_language":
+			next.Translation.Language = f.opts[f.optIdx]
 		case "resource_id":
 			vc.ResourceID = f.opts[f.optIdx]
 		case "app_key":
@@ -303,6 +317,10 @@ func (m *Model) save() {
 		}
 	}
 	if err := correction.Validate(next.Correction); err != nil {
+		m.logf("❌ %s", err)
+		return
+	}
+	if err := correction.ValidateTranslation(&next, runtime.GOOS); err != nil {
 		m.logf("❌ %s", err)
 		return
 	}
@@ -456,6 +474,8 @@ func (m *Model) renderVoiceStatus() string {
 		label, style = "停止中", wStyle
 	case "correcting":
 		label, style = "纠错中", wStyle
+	case "translating":
+		label, style = "翻译中", wStyle
 	case "error":
 		label, style = "错误", eStyle
 	}
